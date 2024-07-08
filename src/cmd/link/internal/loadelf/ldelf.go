@@ -22,7 +22,7 @@ import (
 
 /*
 Derived from Plan 9 from User Space's src/libmach/elf.h, elf.c
-http://code.swtch.com/plan9port/src/tip/src/libmach/
+https://github.com/9fans/plan9port/tree/master/src/libmach/
 
 	Copyright © 2004 Russ Cox.
 	Portions Copyright © 2008-2010 Google Inc.
@@ -245,12 +245,12 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 	newSym := func(name string, version int) loader.Sym {
 		return l.CreateStaticSym(name)
 	}
-	lookup := func(name string, version int) loader.Sym {
-		return l.LookupOrCreateSym(name, version)
-	}
+	lookup := l.LookupOrCreateCgoExport
 	errorf := func(str string, args ...interface{}) ([]loader.Sym, uint32, error) {
 		return nil, 0, fmt.Errorf("loadelf: %s: %v", pn, fmt.Sprintf(str, args...))
 	}
+
+	ehdrFlags = initEhdrFlags
 
 	base := f.Offset()
 
@@ -346,6 +346,10 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 		if mach != elf.EM_MIPS || class != elf.ELFCLASS64 {
 			return errorf("elf object but not mips64")
 		}
+	case sys.Loong64:
+		if mach != elf.EM_LOONGARCH || class != elf.ELFCLASS64 {
+			return errorf("elf object but not loong64")
+		}
 
 	case sys.ARM:
 		if e != binary.LittleEndian || mach != elf.EM_ARM || class != elf.ELFCLASS32 {
@@ -370,6 +374,11 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 	case sys.PPC64:
 		if mach != elf.EM_PPC64 || class != elf.ELFCLASS64 {
 			return errorf("elf object but not ppc64")
+		}
+
+	case sys.RISCV64:
+		if mach != elf.EM_RISCV || class != elf.ELFCLASS64 {
+			return errorf("elf object but not riscv64")
 		}
 
 	case sys.S390X:
@@ -594,7 +603,7 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 			if strings.HasPrefix(elfsym.name, ".LASF") { // gcc on s390x does this
 				continue
 			}
-			return errorf("%v: sym#%d: ignoring symbol in section %d (type %d)", elfsym.sym, i, elfsym.shndx, elfsym.type_)
+			return errorf("%v: sym#%d (%s): ignoring symbol in section %d (type %d)", elfsym.sym, i, elfsym.name, elfsym.shndx, elfsym.type_)
 		}
 
 		s := elfsym.sym
@@ -610,7 +619,7 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 		sb := l.MakeSymbolUpdater(s)
 
 		sb.SetType(sectsb.Type())
-		sectsb.PrependSub(s)
+		sectsb.AddInteriorSym(s)
 		if !l.AttrCgoExportDynamic(s) {
 			sb.SetDynimplib("") // satisfy dynimport
 		}
@@ -625,10 +634,16 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 
 		if elf.Machine(elfobj.machine) == elf.EM_PPC64 {
 			flag := int(elfsym.other) >> 5
-			if 2 <= flag && flag <= 6 {
-				l.SetSymLocalentry(s, 1<<uint(flag-2))
-			} else if flag == 7 {
+			switch flag {
+			case 0:
+				// No local entry. R2 is preserved.
+			case 1:
+				// These require R2 be saved and restored by the caller. This isn't supported today.
+				return errorf("%s: unable to handle local entry type 1", sb.Name())
+			case 7:
 				return errorf("%s: invalid sym.other 0x%x", sb.Name(), elfsym.other)
+			default:
+				l.SetSymLocalentry(s, 4<<uint(flag-2))
 			}
 		}
 	}
@@ -748,7 +763,7 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 			}
 
 			rType := objabi.ElfRelocOffset + objabi.RelocType(relocType)
-			rSize, err := relSize(arch, pn, uint32(relocType))
+			rSize, addendSize, err := relSize(arch, pn, uint32(relocType))
 			if err != nil {
 				return nil, 0, err
 			}
@@ -765,10 +780,10 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, f *bio.Reader, 
 				}
 			}
 
-			if rSize == 2 {
+			if addendSize == 2 {
 				rAdd = int64(int16(rAdd))
 			}
-			if rSize == 4 {
+			if addendSize == 4 {
 				rAdd = int64(int32(rAdd))
 			}
 
@@ -929,9 +944,7 @@ func readelfsym(newSym, lookup func(string, int) loader.Sym, l *loader.Loader, a
 		}
 	}
 
-	// TODO(mwhudson): the test of VisibilityHidden here probably doesn't make
-	// sense and should be removed when someone has thought about it properly.
-	if s != 0 && l.SymType(s) == 0 && !l.AttrVisibilityHidden(s) && elfsym.type_ != elf.STT_SECTION {
+	if s != 0 && l.SymType(s) == 0 && elfsym.type_ != elf.STT_SECTION {
 		sb := l.MakeSymbolUpdater(s)
 		sb.SetType(sym.SXREF)
 	}
@@ -940,29 +953,36 @@ func readelfsym(newSym, lookup func(string, int) loader.Sym, l *loader.Loader, a
 	return nil
 }
 
-func relSize(arch *sys.Arch, pn string, elftype uint32) (uint8, error) {
+// Return the size of the relocated field, and the size of the addend as the first
+// and second values. Note, the addend may be larger than the relocation field in
+// some cases when a relocated value is split across multiple relocations.
+func relSize(arch *sys.Arch, pn string, elftype uint32) (uint8, uint8, error) {
 	// TODO(mdempsky): Replace this with a struct-valued switch statement
 	// once golang.org/issue/15164 is fixed or found to not impair cmd/link
 	// performance.
 
 	const (
-		AMD64  = uint32(sys.AMD64)
-		ARM    = uint32(sys.ARM)
-		ARM64  = uint32(sys.ARM64)
-		I386   = uint32(sys.I386)
-		PPC64  = uint32(sys.PPC64)
-		S390X  = uint32(sys.S390X)
-		MIPS   = uint32(sys.MIPS)
-		MIPS64 = uint32(sys.MIPS64)
+		AMD64   = uint32(sys.AMD64)
+		ARM     = uint32(sys.ARM)
+		ARM64   = uint32(sys.ARM64)
+		I386    = uint32(sys.I386)
+		LOONG64 = uint32(sys.Loong64)
+		MIPS    = uint32(sys.MIPS)
+		MIPS64  = uint32(sys.MIPS64)
+		PPC64   = uint32(sys.PPC64)
+		RISCV64 = uint32(sys.RISCV64)
+		S390X   = uint32(sys.S390X)
 	)
 
 	switch uint32(arch.Family) | elftype<<16 {
 	default:
-		return 0, fmt.Errorf("%s: unknown relocation type %d; compiled without -fpic?", pn, elftype)
+		return 0, 0, fmt.Errorf("%s: unknown relocation type %d; compiled without -fpic?", pn, elftype)
 
 	case MIPS | uint32(elf.R_MIPS_HI16)<<16,
 		MIPS | uint32(elf.R_MIPS_LO16)<<16,
 		MIPS | uint32(elf.R_MIPS_GOT16)<<16,
+		MIPS | uint32(elf.R_MIPS_GOT_HI16)<<16,
+		MIPS | uint32(elf.R_MIPS_GOT_LO16)<<16,
 		MIPS | uint32(elf.R_MIPS_GPREL16)<<16,
 		MIPS | uint32(elf.R_MIPS_GOT_PAGE)<<16,
 		MIPS | uint32(elf.R_MIPS_JALR)<<16,
@@ -970,30 +990,38 @@ func relSize(arch *sys.Arch, pn string, elftype uint32) (uint8, error) {
 		MIPS64 | uint32(elf.R_MIPS_HI16)<<16,
 		MIPS64 | uint32(elf.R_MIPS_LO16)<<16,
 		MIPS64 | uint32(elf.R_MIPS_GOT16)<<16,
+		MIPS64 | uint32(elf.R_MIPS_GOT_HI16)<<16,
+		MIPS64 | uint32(elf.R_MIPS_GOT_LO16)<<16,
 		MIPS64 | uint32(elf.R_MIPS_GPREL16)<<16,
 		MIPS64 | uint32(elf.R_MIPS_GOT_PAGE)<<16,
 		MIPS64 | uint32(elf.R_MIPS_JALR)<<16,
-		MIPS64 | uint32(elf.R_MIPS_GOT_OFST)<<16:
-		return 4, nil
+		MIPS64 | uint32(elf.R_MIPS_GOT_OFST)<<16,
+		MIPS64 | uint32(elf.R_MIPS_CALL16)<<16,
+		MIPS64 | uint32(elf.R_MIPS_GPREL32)<<16,
+		MIPS64 | uint32(elf.R_MIPS_64)<<16,
+		MIPS64 | uint32(elf.R_MIPS_GOT_DISP)<<16:
+		return 4, 4, nil
+
+	case LOONG64 | uint32(elf.R_LARCH_SOP_PUSH_PCREL)<<16,
+		LOONG64 | uint32(elf.R_LARCH_SOP_PUSH_GPREL)<<16,
+		LOONG64 | uint32(elf.R_LARCH_SOP_PUSH_ABSOLUTE)<<16,
+		LOONG64 | uint32(elf.R_LARCH_MARK_LA)<<16,
+		LOONG64 | uint32(elf.R_LARCH_SOP_POP_32_S_0_10_10_16_S2)<<16,
+		LOONG64 | uint32(elf.R_LARCH_64)<<16,
+		LOONG64 | uint32(elf.R_LARCH_MARK_PCREL)<<16,
+		LOONG64 | uint32(elf.R_LARCH_32_PCREL)<<16:
+		return 4, 4, nil
 
 	case S390X | uint32(elf.R_390_8)<<16:
-		return 1, nil
+		return 1, 1, nil
 
 	case PPC64 | uint32(elf.R_PPC64_TOC16)<<16,
-		PPC64 | uint32(elf.R_PPC64_TOC16_LO)<<16,
-		PPC64 | uint32(elf.R_PPC64_TOC16_HI)<<16,
-		PPC64 | uint32(elf.R_PPC64_TOC16_HA)<<16,
-		PPC64 | uint32(elf.R_PPC64_TOC16_DS)<<16,
-		PPC64 | uint32(elf.R_PPC64_TOC16_LO_DS)<<16,
-		PPC64 | uint32(elf.R_PPC64_REL16_LO)<<16,
-		PPC64 | uint32(elf.R_PPC64_REL16_HI)<<16,
-		PPC64 | uint32(elf.R_PPC64_REL16_HA)<<16,
 		S390X | uint32(elf.R_390_16)<<16,
 		S390X | uint32(elf.R_390_GOT16)<<16,
 		S390X | uint32(elf.R_390_PC16)<<16,
 		S390X | uint32(elf.R_390_PC16DBL)<<16,
 		S390X | uint32(elf.R_390_PLT16DBL)<<16:
-		return 2, nil
+		return 2, 2, nil
 
 	case ARM | uint32(elf.R_ARM_ABS32)<<16,
 		ARM | uint32(elf.R_ARM_GOT32)<<16,
@@ -1013,6 +1041,7 @@ func relSize(arch *sys.Arch, pn string, elftype uint32) (uint8, error) {
 		ARM64 | uint32(elf.R_AARCH64_ADR_PREL_PG_HI21)<<16,
 		ARM64 | uint32(elf.R_AARCH64_ADD_ABS_LO12_NC)<<16,
 		ARM64 | uint32(elf.R_AARCH64_LDST8_ABS_LO12_NC)<<16,
+		ARM64 | uint32(elf.R_AARCH64_LDST16_ABS_LO12_NC)<<16,
 		ARM64 | uint32(elf.R_AARCH64_LDST32_ABS_LO12_NC)<<16,
 		ARM64 | uint32(elf.R_AARCH64_LDST64_ABS_LO12_NC)<<16,
 		ARM64 | uint32(elf.R_AARCH64_LDST128_ABS_LO12_NC)<<16,
@@ -1040,7 +1069,7 @@ func relSize(arch *sys.Arch, pn string, elftype uint32) (uint8, error) {
 		S390X | uint32(elf.R_390_PLT32DBL)<<16,
 		S390X | uint32(elf.R_390_GOTPCDBL)<<16,
 		S390X | uint32(elf.R_390_GOTENT)<<16:
-		return 4, nil
+		return 4, 4, nil
 
 	case AMD64 | uint32(elf.R_X86_64_64)<<16,
 		AMD64 | uint32(elf.R_X86_64_PC64)<<16,
@@ -1055,7 +1084,61 @@ func relSize(arch *sys.Arch, pn string, elftype uint32) (uint8, error) {
 		S390X | uint32(elf.R_390_PC64)<<16,
 		S390X | uint32(elf.R_390_GOT64)<<16,
 		S390X | uint32(elf.R_390_PLT64)<<16:
-		return 8, nil
+		return 8, 8, nil
+
+	case RISCV64 | uint32(elf.R_RISCV_SET6)<<16,
+		RISCV64 | uint32(elf.R_RISCV_SUB6)<<16,
+		RISCV64 | uint32(elf.R_RISCV_SET8)<<16,
+		RISCV64 | uint32(elf.R_RISCV_SUB8)<<16:
+		return 1, 1, nil
+
+	case RISCV64 | uint32(elf.R_RISCV_RVC_BRANCH)<<16,
+		RISCV64 | uint32(elf.R_RISCV_RVC_JUMP)<<16,
+		RISCV64 | uint32(elf.R_RISCV_SET16)<<16,
+		RISCV64 | uint32(elf.R_RISCV_SUB16)<<16:
+		return 2, 2, nil
+
+	case RISCV64 | uint32(elf.R_RISCV_32)<<16,
+		RISCV64 | uint32(elf.R_RISCV_BRANCH)<<16,
+		RISCV64 | uint32(elf.R_RISCV_HI20)<<16,
+		RISCV64 | uint32(elf.R_RISCV_LO12_I)<<16,
+		RISCV64 | uint32(elf.R_RISCV_LO12_S)<<16,
+		RISCV64 | uint32(elf.R_RISCV_GOT_HI20)<<16,
+		RISCV64 | uint32(elf.R_RISCV_PCREL_HI20)<<16,
+		RISCV64 | uint32(elf.R_RISCV_PCREL_LO12_I)<<16,
+		RISCV64 | uint32(elf.R_RISCV_PCREL_LO12_S)<<16,
+		RISCV64 | uint32(elf.R_RISCV_ADD32)<<16,
+		RISCV64 | uint32(elf.R_RISCV_SET32)<<16,
+		RISCV64 | uint32(elf.R_RISCV_SUB32)<<16,
+		RISCV64 | uint32(elf.R_RISCV_32_PCREL)<<16,
+		RISCV64 | uint32(elf.R_RISCV_RELAX)<<16:
+		return 4, 4, nil
+
+	case RISCV64 | uint32(elf.R_RISCV_64)<<16,
+		RISCV64 | uint32(elf.R_RISCV_CALL)<<16,
+		RISCV64 | uint32(elf.R_RISCV_CALL_PLT)<<16:
+		return 8, 8, nil
+
+	case PPC64 | uint32(elf.R_PPC64_TOC16_LO)<<16,
+		PPC64 | uint32(elf.R_PPC64_TOC16_HI)<<16,
+		PPC64 | uint32(elf.R_PPC64_TOC16_HA)<<16,
+		PPC64 | uint32(elf.R_PPC64_TOC16_DS)<<16,
+		PPC64 | uint32(elf.R_PPC64_TOC16_LO_DS)<<16,
+		PPC64 | uint32(elf.R_PPC64_REL16_LO)<<16,
+		PPC64 | uint32(elf.R_PPC64_REL16_HI)<<16,
+		PPC64 | uint32(elf.R_PPC64_REL16_HA)<<16,
+		PPC64 | uint32(elf.R_PPC64_PLT16_HA)<<16,
+		PPC64 | uint32(elf.R_PPC64_PLT16_LO_DS)<<16:
+		return 2, 4, nil
+
+	// PPC64 inline PLT sequence hint relocations (-fno-plt)
+	// These are informational annotations to assist linker optimizations.
+	case PPC64 | uint32(elf.R_PPC64_PLTSEQ)<<16,
+		PPC64 | uint32(elf.R_PPC64_PLTCALL)<<16,
+		PPC64 | uint32(elf.R_PPC64_PLTCALL_NOTOC)<<16,
+		PPC64 | uint32(elf.R_PPC64_PLTSEQ_NOTOC)<<16:
+		return 0, 0, nil
+
 	}
 }
 

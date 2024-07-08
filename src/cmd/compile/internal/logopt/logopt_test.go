@@ -6,9 +6,7 @@ package logopt
 
 import (
 	"internal/testenv"
-	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -51,7 +49,35 @@ func want(t *testing.T, out string, desired string) {
 
 func wantN(t *testing.T, out string, desired string, n int) {
 	if strings.Count(out, desired) != n {
-		t.Errorf("expected exactly %d occurences of %s in \n%s", n, desired, out)
+		t.Errorf("expected exactly %d occurrences of %s in \n%s", n, desired, out)
+	}
+}
+
+func TestPathStuff(t *testing.T) {
+	sep := string(filepath.Separator)
+	if path, whine := parseLogPath("file:///c:foo"); path != "c:foo" || whine != "" { // good path
+		t.Errorf("path='%s', whine='%s'", path, whine)
+	}
+	if path, whine := parseLogPath("file:///foo"); path != sep+"foo" || whine != "" { // good path
+		t.Errorf("path='%s', whine='%s'", path, whine)
+	}
+	if path, whine := parseLogPath("foo"); path != "" || whine == "" { // BAD path
+		t.Errorf("path='%s', whine='%s'", path, whine)
+	}
+	if sep == "\\" { // On WINDOWS ONLY
+		if path, whine := parseLogPath("C:/foo"); path != "C:\\foo" || whine != "" { // good path
+			t.Errorf("path='%s', whine='%s'", path, whine)
+		}
+		if path, whine := parseLogPath("c:foo"); path != "" || whine == "" { // BAD path
+			t.Errorf("path='%s', whine='%s'", path, whine)
+		}
+		if path, whine := parseLogPath("/foo"); path != "" || whine == "" { // BAD path
+			t.Errorf("path='%s', whine='%s'", path, whine)
+		}
+	} else { // ON UNIX ONLY
+		if path, whine := parseLogPath("/foo"); path != sep+"foo" || whine != "" { // good path
+			t.Errorf("path='%s', whine='%s'", path, whine)
+		}
 	}
 }
 
@@ -60,7 +86,7 @@ func TestLogOpt(t *testing.T) {
 
 	testenv.MustHaveGoBuild(t)
 
-	dir, err := ioutil.TempDir("", "TestLogOpt")
+	dir, err := os.MkdirTemp("", "TestLogOpt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +94,7 @@ func TestLogOpt(t *testing.T) {
 
 	dir = fixSlash(dir) // Normalize the directory name as much as possible, for Windows testing
 	src := filepath.Join(dir, "file.go")
-	if err := ioutil.WriteFile(src, []byte(srcCode), 0644); err != nil {
+	if err := os.WriteFile(src, []byte(srcCode), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -104,7 +130,7 @@ func TestLogOpt(t *testing.T) {
 	// Check at both 1 and 8-byte alignments.
 	t.Run("Copy", func(t *testing.T) {
 		const copyCode = `package x
-func s128a1(x *[128]int8) [128]int8 { 
+func s128a1(x *[128]int8) [128]int8 {
 	return *x
 }
 func s127a1(x *[127]int8) [127]int8 {
@@ -118,7 +144,7 @@ func s15a8(x *[15]int64) [15]int64 {
 }
 `
 		copy := filepath.Join(dir, "copy.go")
-		if err := ioutil.WriteFile(copy, []byte(copyCode), 0644); err != nil {
+		if err := os.WriteFile(copy, []byte(copyCode), 0644); err != nil {
 			t.Fatal(err)
 		}
 		outcopy := filepath.Join(dir, "copy.o")
@@ -127,7 +153,7 @@ func s15a8(x *[15]int64) [15]int64 {
 		arches := []string{runtime.GOARCH}
 		goos0 := runtime.GOOS
 		if runtime.GOARCH == "amd64" { // Test many things with "linux" (wasm will get "js")
-			arches = []string{"arm", "arm64", "386", "amd64", "mips", "mips64", "ppc64le", "riscv64", "s390x", "wasm"}
+			arches = []string{"arm", "arm64", "386", "amd64", "mips", "mips64", "loong64", "ppc64le", "riscv64", "s390x", "wasm"}
 			goos0 = "linux"
 		}
 
@@ -141,7 +167,7 @@ func s15a8(x *[15]int64) [15]int64 {
 				if err != nil {
 					t.Error("-json=0,file://log/opt should have succeeded")
 				}
-				logged, err := ioutil.ReadFile(filepath.Join(dir, "log", "opt", "x", "copy.json"))
+				logged, err := os.ReadFile(filepath.Join(dir, "log", "opt", "x", "copy.json"))
 				if err != nil {
 					t.Error("-json=0,file://log/opt missing expected log file")
 				}
@@ -168,7 +194,7 @@ func s15a8(x *[15]int64) [15]int64 {
 		if err != nil {
 			t.Error("-json=0,file://log/opt should have succeeded")
 		}
-		logged, err := ioutil.ReadFile(filepath.Join(dir, "log", "opt", "x", "file.json"))
+		logged, err := os.ReadFile(filepath.Join(dir, "log", "opt", "x", "file.json"))
 		if err != nil {
 			t.Error("-json=0,file://log/opt missing expected log file")
 		}
@@ -180,28 +206,27 @@ func s15a8(x *[15]int64) [15]int64 {
 			`"relatedInformation":[{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":4,"character":11},"end":{"line":4,"character":11}}},"message":"inlineLoc"}]}`)
 		want(t, slogged, `{"range":{"start":{"line":11,"character":6},"end":{"line":11,"character":6}},"severity":3,"code":"isInBounds","source":"go compiler","message":""}`)
 		want(t, slogged, `{"range":{"start":{"line":7,"character":6},"end":{"line":7,"character":6}},"severity":3,"code":"canInlineFunction","source":"go compiler","message":"cost: 35"}`)
-		want(t, slogged, `{"range":{"start":{"line":21,"character":21},"end":{"line":21,"character":21}},"severity":3,"code":"cannotInlineCall","source":"go compiler","message":"foo cannot be inlined (escaping closure variable)"}`)
 		// escape analysis explanation
-		want(t, slogged, `{"range":{"start":{"line":7,"character":13},"end":{"line":7,"character":13}},"severity":3,"code":"leak","source":"go compiler","message":"parameter z leaks to ~r2 with derefs=0",`+
+		want(t, slogged, `{"range":{"start":{"line":7,"character":13},"end":{"line":7,"character":13}},"severity":3,"code":"leak","source":"go compiler","message":"parameter z leaks to ~r0 with derefs=0",`+
 			`"relatedInformation":[`+
 			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:    flow: y = z:"},`+
-			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:      from y = \u003cN\u003e (assign-pair)"},`+
-			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:    flow: ~r1 = y:"},`+
+			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:      from y := z (assign-pair)"},`+
+			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:    flow: ~R0 = y:"},`+
 			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":4,"character":11},"end":{"line":4,"character":11}}},"message":"inlineLoc"},`+
 			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:      from y.b (dot of pointer)"},`+
 			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":4,"character":11},"end":{"line":4,"character":11}}},"message":"inlineLoc"},`+
 			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:      from \u0026y.b (address-of)"},`+
 			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":4,"character":9},"end":{"line":4,"character":9}}},"message":"inlineLoc"},`+
-			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:      from ~r1 = \u003cN\u003e (assign-pair)"},`+
-			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":3},"end":{"line":9,"character":3}}},"message":"escflow:    flow: ~r2 = ~r1:"},`+
-			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":3},"end":{"line":9,"character":3}}},"message":"escflow:      from return (*int)(~r1) (return)"}]}`)
+			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:      from ~R0 = \u0026y.b (assign-pair)"},`+
+			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":3},"end":{"line":9,"character":3}}},"message":"escflow:    flow: ~r0 = ~R0:"},`+
+			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":3},"end":{"line":9,"character":3}}},"message":"escflow:      from return ~R0 (return)"}]}`)
 	})
 }
 
 func testLogOpt(t *testing.T, flag, src, outfile string) (string, error) {
-	run := []string{testenv.GoToolPath(t), "tool", "compile", flag, "-o", outfile, src}
+	run := []string{testenv.GoToolPath(t), "tool", "compile", "-p=p", flag, "-o", outfile, src}
 	t.Log(run)
-	cmd := exec.Command(run[0], run[1:]...)
+	cmd := testenv.Command(t, run[0], run[1:]...)
 	out, err := cmd.CombinedOutput()
 	t.Logf("%s", out)
 	return string(out), err
@@ -209,9 +234,9 @@ func testLogOpt(t *testing.T, flag, src, outfile string) (string, error) {
 
 func testLogOptDir(t *testing.T, dir, flag, src, outfile string) (string, error) {
 	// Notice the specified import path "x"
-	run := []string{testenv.GoToolPath(t), "tool", "compile", "-p", "x", flag, "-o", outfile, src}
+	run := []string{testenv.GoToolPath(t), "tool", "compile", "-p=x", flag, "-o", outfile, src}
 	t.Log(run)
-	cmd := exec.Command(run[0], run[1:]...)
+	cmd := testenv.Command(t, run[0], run[1:]...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	t.Logf("%s", out)
@@ -220,9 +245,9 @@ func testLogOptDir(t *testing.T, dir, flag, src, outfile string) (string, error)
 
 func testCopy(t *testing.T, dir, goarch, goos, src, outfile string) (string, error) {
 	// Notice the specified import path "x"
-	run := []string{testenv.GoToolPath(t), "tool", "compile", "-p", "x", "-json=0,file://log/opt", "-o", outfile, src}
+	run := []string{testenv.GoToolPath(t), "tool", "compile", "-p=x", "-json=0,file://log/opt", "-o", outfile, src}
 	t.Log(run)
-	cmd := exec.Command(run[0], run[1:]...)
+	cmd := testenv.Command(t, run[0], run[1:]...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOARCH="+goarch, "GOOS="+goos)
 	out, err := cmd.CombinedOutput()

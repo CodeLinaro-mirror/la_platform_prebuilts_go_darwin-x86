@@ -337,6 +337,7 @@ func RuneLen(r rune) int {
 }
 
 // EncodeRune writes into p (which must be large enough) the UTF-8 encoding of the rune.
+// If the rune is out of range, it writes the encoding of RuneError.
 // It returns the number of bytes written.
 func EncodeRune(p []byte, r rune) int {
 	// Negative values are erroneous. Making it unsigned addresses the problem.
@@ -365,6 +366,32 @@ func EncodeRune(p []byte, r rune) int {
 		p[2] = tx | byte(r>>6)&maskx
 		p[3] = tx | byte(r)&maskx
 		return 4
+	}
+}
+
+// AppendRune appends the UTF-8 encoding of r to the end of p and
+// returns the extended buffer. If the rune is out of range,
+// it appends the encoding of RuneError.
+func AppendRune(p []byte, r rune) []byte {
+	// This function is inlineable for fast handling of ASCII.
+	if uint32(r) <= rune1Max {
+		return append(p, byte(r))
+	}
+	return appendRuneNonASCII(p, r)
+}
+
+func appendRuneNonASCII(p []byte, r rune) []byte {
+	// Negative values are erroneous. Making it unsigned addresses the problem.
+	switch i := uint32(r); {
+	case i <= rune2Max:
+		return append(p, t2|byte(r>>6), tx|byte(r)&maskx)
+	case i > MaxRune, surrogateMin <= i && i <= surrogateMax:
+		r = RuneError
+		fallthrough
+	case i <= rune3Max:
+		return append(p, t3|byte(r>>12), tx|byte(r>>6)&maskx, tx|byte(r)&maskx)
+	default:
+		return append(p, t4|byte(r>>18), tx|byte(r>>12)&maskx, tx|byte(r>>6)&maskx, tx|byte(r)&maskx)
 	}
 }
 
@@ -448,6 +475,11 @@ func RuneStart(b byte) bool { return b&0xC0 != 0x80 }
 
 // Valid reports whether p consists entirely of valid UTF-8-encoded runes.
 func Valid(p []byte) bool {
+	// This optimization avoids the need to recompute the capacity
+	// when generating code for p[8:], bringing it to parity with
+	// ValidString, which was 20% faster on long ASCII strings.
+	p = p[:len(p):len(p)]
+
 	// Fast path. Check for and skip 8 bytes of ASCII characters per iteration.
 	for len(p) >= 8 {
 		// Combining two 32 bit loads allows the same code to be used

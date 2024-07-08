@@ -1,5 +1,5 @@
-// Code generated from gen/generic.rules; DO NOT EDIT.
-// generated with: cd gen; go run *.go
+// Code generated from _gen/generic.rules; DO NOT EDIT.
+// generated with: cd _gen; go run .
 
 package ssa
 
@@ -34,6 +34,8 @@ func rewriteValuegeneric(v *Value) bool {
 		return rewriteValuegeneric_OpAndB(v)
 	case OpArraySelect:
 		return rewriteValuegeneric_OpArraySelect(v)
+	case OpCeil:
+		return rewriteValuegeneric_OpCeil(v)
 	case OpCom16:
 		return rewriteValuegeneric_OpCom16(v)
 	case OpCom32:
@@ -120,10 +122,12 @@ func rewriteValuegeneric(v *Value) bool {
 		return rewriteValuegeneric_OpEqPtr(v)
 	case OpEqSlice:
 		return rewriteValuegeneric_OpEqSlice(v)
+	case OpFloor:
+		return rewriteValuegeneric_OpFloor(v)
 	case OpIMake:
 		return rewriteValuegeneric_OpIMake(v)
-	case OpInterCall:
-		return rewriteValuegeneric_OpInterCall(v)
+	case OpInterLECall:
+		return rewriteValuegeneric_OpInterLECall(v)
 	case OpIsInBounds:
 		return rewriteValuegeneric_OpIsInBounds(v)
 	case OpIsNonNil:
@@ -298,6 +302,8 @@ func rewriteValuegeneric(v *Value) bool {
 		return rewriteValuegeneric_OpRound32F(v)
 	case OpRound64F:
 		return rewriteValuegeneric_OpRound64F(v)
+	case OpRoundToEven:
+		return rewriteValuegeneric_OpRoundToEven(v)
 	case OpRsh16Ux16:
 		return rewriteValuegeneric_OpRsh16Ux16(v)
 	case OpRsh16Ux32:
@@ -366,6 +372,8 @@ func rewriteValuegeneric(v *Value) bool {
 		return rewriteValuegeneric_OpSelect0(v)
 	case OpSelect1:
 		return rewriteValuegeneric_OpSelect1(v)
+	case OpSelectN:
+		return rewriteValuegeneric_OpSelectN(v)
 	case OpSignExt16to32:
 		return rewriteValuegeneric_OpSignExt16to32(v)
 	case OpSignExt16to64:
@@ -388,8 +396,8 @@ func rewriteValuegeneric(v *Value) bool {
 		return rewriteValuegeneric_OpSlicemask(v)
 	case OpSqrt:
 		return rewriteValuegeneric_OpSqrt(v)
-	case OpStaticCall:
-		return rewriteValuegeneric_OpStaticCall(v)
+	case OpStaticLECall:
+		return rewriteValuegeneric_OpStaticLECall(v)
 	case OpStore:
 		return rewriteValuegeneric_OpStore(v)
 	case OpStringLen:
@@ -410,6 +418,8 @@ func rewriteValuegeneric(v *Value) bool {
 		return rewriteValuegeneric_OpSub64F(v)
 	case OpSub8:
 		return rewriteValuegeneric_OpSub8(v)
+	case OpTrunc:
+		return rewriteValuegeneric_OpTrunc(v)
 	case OpTrunc16to8:
 		return rewriteValuegeneric_OpTrunc16to8(v)
 	case OpTrunc32to16:
@@ -451,6 +461,7 @@ func rewriteValuegeneric_OpAdd16(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (Add16 (Const16 [c]) (Const16 [d]))
 	// result: (Const16 [c+d])
 	for {
@@ -517,6 +528,38 @@ func rewriteValuegeneric_OpAdd16(v *Value) bool {
 		}
 		break
 	}
+	// match: (Add16 x (Neg16 y))
+	// result: (Sub16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			x := v_0
+			if v_1.Op != OpNeg16 {
+				continue
+			}
+			y := v_1.Args[0]
+			v.reset(OpSub16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add16 (Com16 x) x)
+	// result: (Const16 [-1])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom16 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
+				continue
+			}
+			v.reset(OpConst16)
+			v.AuxInt = int16ToAuxInt(-1)
+			return true
+		}
+		break
+	}
 	// match: (Add16 (Const16 [1]) (Com16 x))
 	// result: (Neg16 x)
 	for {
@@ -528,6 +571,52 @@ func rewriteValuegeneric_OpAdd16(v *Value) bool {
 			v.reset(OpNeg16)
 			v.AddArg(x)
 			return true
+		}
+		break
+	}
+	// match: (Add16 x (Sub16 y x))
+	// result: y
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			x := v_0
+			if v_1.Op != OpSub16 {
+				continue
+			}
+			_ = v_1.Args[1]
+			y := v_1.Args[0]
+			if x != v_1.Args[1] {
+				continue
+			}
+			v.copyOf(y)
+			return true
+		}
+		break
+	}
+	// match: (Add16 x (Add16 y (Sub16 z x)))
+	// result: (Add16 y z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			x := v_0
+			if v_1.Op != OpAdd16 {
+				continue
+			}
+			_ = v_1.Args[1]
+			v_1_0 := v_1.Args[0]
+			v_1_1 := v_1.Args[1]
+			for _i1 := 0; _i1 <= 1; _i1, v_1_0, v_1_1 = _i1+1, v_1_1, v_1_0 {
+				y := v_1_0
+				if v_1_1.Op != OpSub16 {
+					continue
+				}
+				_ = v_1_1.Args[1]
+				z := v_1_1.Args[0]
+				if x != v_1_1.Args[1] {
+					continue
+				}
+				v.reset(OpAdd16)
+				v.AddArg2(y, z)
+				return true
+			}
 		}
 		break
 	}
@@ -588,33 +677,6 @@ func rewriteValuegeneric_OpAdd16(v *Value) bool {
 		}
 		break
 	}
-	// match: (Add16 (Sub16 z i:(Const16 <t>)) x)
-	// cond: (z.Op != OpConst16 && x.Op != OpConst16)
-	// result: (Sub16 (Add16 <t> x z) i)
-	for {
-		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
-			if v_0.Op != OpSub16 {
-				continue
-			}
-			_ = v_0.Args[1]
-			z := v_0.Args[0]
-			i := v_0.Args[1]
-			if i.Op != OpConst16 {
-				continue
-			}
-			t := i.Type
-			x := v_1
-			if !(z.Op != OpConst16 && x.Op != OpConst16) {
-				continue
-			}
-			v.reset(OpSub16)
-			v0 := b.NewValue0(v.Pos, OpAdd16, t)
-			v0.AddArg2(x, z)
-			v.AddArg2(v0, i)
-			return true
-		}
-		break
-	}
 	// match: (Add16 (Const16 <t> [c]) (Add16 (Const16 <t> [d]) x))
 	// result: (Add16 (Const16 <t> [c+d]) x)
 	for {
@@ -671,29 +733,310 @@ func rewriteValuegeneric_OpAdd16(v *Value) bool {
 		}
 		break
 	}
-	// match: (Add16 (Const16 <t> [c]) (Sub16 x (Const16 <t> [d])))
-	// result: (Add16 (Const16 <t> [c-d]) x)
+	// match: (Add16 (Lsh16x64 x z:(Const64 <t> [c])) (Rsh16Ux64 x (Const64 [d])))
+	// cond: c < 16 && d == 16-c && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
-			if v_0.Op != OpConst16 {
+			if v_0.Op != OpLsh16x64 {
 				continue
 			}
-			t := v_0.Type
-			c := auxIntToInt16(v_0.AuxInt)
-			if v_1.Op != OpSub16 {
+			_ = v_0.Args[1]
+			x := v_0.Args[0]
+			z := v_0.Args[1]
+			if z.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(z.AuxInt)
+			if v_1.Op != OpRsh16Ux64 {
 				continue
 			}
 			_ = v_1.Args[1]
-			x := v_1.Args[0]
-			v_1_1 := v_1.Args[1]
-			if v_1_1.Op != OpConst16 || v_1_1.Type != t {
+			if x != v_1.Args[0] {
 				continue
 			}
-			d := auxIntToInt16(v_1_1.AuxInt)
-			v.reset(OpAdd16)
-			v0 := b.NewValue0(v.Pos, OpConst16, t)
-			v0.AuxInt = int16ToAuxInt(c - d)
-			v.AddArg2(v0, x)
+			v_1_1 := v_1.Args[1]
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			d := auxIntToInt64(v_1_1.AuxInt)
+			if !(c < 16 && d == 16-c && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add16 left:(Lsh16x64 x y) right:(Rsh16Ux64 x (Sub64 (Const64 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh16x64 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh16Ux64 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub64 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst64 || auxIntToInt64(right_1_0.AuxInt) != 16 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add16 left:(Lsh16x32 x y) right:(Rsh16Ux32 x (Sub32 (Const32 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh16x32 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh16Ux32 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub32 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst32 || auxIntToInt32(right_1_0.AuxInt) != 16 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add16 left:(Lsh16x16 x y) right:(Rsh16Ux16 x (Sub16 (Const16 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh16x16 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh16Ux16 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub16 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst16 || auxIntToInt16(right_1_0.AuxInt) != 16 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add16 left:(Lsh16x8 x y) right:(Rsh16Ux8 x (Sub8 (Const8 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh16x8 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh16Ux8 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub8 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst8 || auxIntToInt8(right_1_0.AuxInt) != 16 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add16 right:(Rsh16Ux64 x y) left:(Lsh16x64 x z:(Sub64 (Const64 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh16Ux64 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh16x64 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub64 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst64 || auxIntToInt64(z_0.AuxInt) != 16 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add16 right:(Rsh16Ux32 x y) left:(Lsh16x32 x z:(Sub32 (Const32 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh16Ux32 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh16x32 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub32 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst32 || auxIntToInt32(z_0.AuxInt) != 16 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add16 right:(Rsh16Ux16 x y) left:(Lsh16x16 x z:(Sub16 (Const16 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh16Ux16 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh16x16 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub16 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst16 || auxIntToInt16(z_0.AuxInt) != 16 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add16 right:(Rsh16Ux8 x y) left:(Lsh16x8 x z:(Sub8 (Const8 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh16Ux8 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh16x8 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub8 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst8 || auxIntToInt8(z_0.AuxInt) != 16 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
 			return true
 		}
 		break
@@ -704,6 +1047,7 @@ func rewriteValuegeneric_OpAdd32(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (Add32 (Const32 [c]) (Const32 [d]))
 	// result: (Const32 [c+d])
 	for {
@@ -770,6 +1114,38 @@ func rewriteValuegeneric_OpAdd32(v *Value) bool {
 		}
 		break
 	}
+	// match: (Add32 x (Neg32 y))
+	// result: (Sub32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			x := v_0
+			if v_1.Op != OpNeg32 {
+				continue
+			}
+			y := v_1.Args[0]
+			v.reset(OpSub32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add32 (Com32 x) x)
+	// result: (Const32 [-1])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom32 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
+				continue
+			}
+			v.reset(OpConst32)
+			v.AuxInt = int32ToAuxInt(-1)
+			return true
+		}
+		break
+	}
 	// match: (Add32 (Const32 [1]) (Com32 x))
 	// result: (Neg32 x)
 	for {
@@ -781,6 +1157,52 @@ func rewriteValuegeneric_OpAdd32(v *Value) bool {
 			v.reset(OpNeg32)
 			v.AddArg(x)
 			return true
+		}
+		break
+	}
+	// match: (Add32 x (Sub32 y x))
+	// result: y
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			x := v_0
+			if v_1.Op != OpSub32 {
+				continue
+			}
+			_ = v_1.Args[1]
+			y := v_1.Args[0]
+			if x != v_1.Args[1] {
+				continue
+			}
+			v.copyOf(y)
+			return true
+		}
+		break
+	}
+	// match: (Add32 x (Add32 y (Sub32 z x)))
+	// result: (Add32 y z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			x := v_0
+			if v_1.Op != OpAdd32 {
+				continue
+			}
+			_ = v_1.Args[1]
+			v_1_0 := v_1.Args[0]
+			v_1_1 := v_1.Args[1]
+			for _i1 := 0; _i1 <= 1; _i1, v_1_0, v_1_1 = _i1+1, v_1_1, v_1_0 {
+				y := v_1_0
+				if v_1_1.Op != OpSub32 {
+					continue
+				}
+				_ = v_1_1.Args[1]
+				z := v_1_1.Args[0]
+				if x != v_1_1.Args[1] {
+					continue
+				}
+				v.reset(OpAdd32)
+				v.AddArg2(y, z)
+				return true
+			}
 		}
 		break
 	}
@@ -841,33 +1263,6 @@ func rewriteValuegeneric_OpAdd32(v *Value) bool {
 		}
 		break
 	}
-	// match: (Add32 (Sub32 z i:(Const32 <t>)) x)
-	// cond: (z.Op != OpConst32 && x.Op != OpConst32)
-	// result: (Sub32 (Add32 <t> x z) i)
-	for {
-		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
-			if v_0.Op != OpSub32 {
-				continue
-			}
-			_ = v_0.Args[1]
-			z := v_0.Args[0]
-			i := v_0.Args[1]
-			if i.Op != OpConst32 {
-				continue
-			}
-			t := i.Type
-			x := v_1
-			if !(z.Op != OpConst32 && x.Op != OpConst32) {
-				continue
-			}
-			v.reset(OpSub32)
-			v0 := b.NewValue0(v.Pos, OpAdd32, t)
-			v0.AddArg2(x, z)
-			v.AddArg2(v0, i)
-			return true
-		}
-		break
-	}
 	// match: (Add32 (Const32 <t> [c]) (Add32 (Const32 <t> [d]) x))
 	// result: (Add32 (Const32 <t> [c+d]) x)
 	for {
@@ -924,29 +1319,310 @@ func rewriteValuegeneric_OpAdd32(v *Value) bool {
 		}
 		break
 	}
-	// match: (Add32 (Const32 <t> [c]) (Sub32 x (Const32 <t> [d])))
-	// result: (Add32 (Const32 <t> [c-d]) x)
+	// match: (Add32 (Lsh32x64 x z:(Const64 <t> [c])) (Rsh32Ux64 x (Const64 [d])))
+	// cond: c < 32 && d == 32-c && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
-			if v_0.Op != OpConst32 {
+			if v_0.Op != OpLsh32x64 {
 				continue
 			}
-			t := v_0.Type
-			c := auxIntToInt32(v_0.AuxInt)
-			if v_1.Op != OpSub32 {
+			_ = v_0.Args[1]
+			x := v_0.Args[0]
+			z := v_0.Args[1]
+			if z.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(z.AuxInt)
+			if v_1.Op != OpRsh32Ux64 {
 				continue
 			}
 			_ = v_1.Args[1]
-			x := v_1.Args[0]
-			v_1_1 := v_1.Args[1]
-			if v_1_1.Op != OpConst32 || v_1_1.Type != t {
+			if x != v_1.Args[0] {
 				continue
 			}
-			d := auxIntToInt32(v_1_1.AuxInt)
-			v.reset(OpAdd32)
-			v0 := b.NewValue0(v.Pos, OpConst32, t)
-			v0.AuxInt = int32ToAuxInt(c - d)
-			v.AddArg2(v0, x)
+			v_1_1 := v_1.Args[1]
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			d := auxIntToInt64(v_1_1.AuxInt)
+			if !(c < 32 && d == 32-c && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add32 left:(Lsh32x64 x y) right:(Rsh32Ux64 x (Sub64 (Const64 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh32x64 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh32Ux64 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub64 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst64 || auxIntToInt64(right_1_0.AuxInt) != 32 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add32 left:(Lsh32x32 x y) right:(Rsh32Ux32 x (Sub32 (Const32 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh32x32 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh32Ux32 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub32 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst32 || auxIntToInt32(right_1_0.AuxInt) != 32 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add32 left:(Lsh32x16 x y) right:(Rsh32Ux16 x (Sub16 (Const16 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh32x16 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh32Ux16 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub16 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst16 || auxIntToInt16(right_1_0.AuxInt) != 32 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add32 left:(Lsh32x8 x y) right:(Rsh32Ux8 x (Sub8 (Const8 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh32x8 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh32Ux8 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub8 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst8 || auxIntToInt8(right_1_0.AuxInt) != 32 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add32 right:(Rsh32Ux64 x y) left:(Lsh32x64 x z:(Sub64 (Const64 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh32Ux64 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh32x64 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub64 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst64 || auxIntToInt64(z_0.AuxInt) != 32 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add32 right:(Rsh32Ux32 x y) left:(Lsh32x32 x z:(Sub32 (Const32 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh32Ux32 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh32x32 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub32 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst32 || auxIntToInt32(z_0.AuxInt) != 32 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add32 right:(Rsh32Ux16 x y) left:(Lsh32x16 x z:(Sub16 (Const16 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh32Ux16 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh32x16 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub16 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst16 || auxIntToInt16(z_0.AuxInt) != 32 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add32 right:(Rsh32Ux8 x y) left:(Lsh32x8 x z:(Sub8 (Const8 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh32Ux8 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh32x8 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub8 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst8 || auxIntToInt8(z_0.AuxInt) != 32 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
 			return true
 		}
 		break
@@ -984,6 +1660,7 @@ func rewriteValuegeneric_OpAdd64(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (Add64 (Const64 [c]) (Const64 [d]))
 	// result: (Const64 [c+d])
 	for {
@@ -1050,6 +1727,38 @@ func rewriteValuegeneric_OpAdd64(v *Value) bool {
 		}
 		break
 	}
+	// match: (Add64 x (Neg64 y))
+	// result: (Sub64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			x := v_0
+			if v_1.Op != OpNeg64 {
+				continue
+			}
+			y := v_1.Args[0]
+			v.reset(OpSub64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add64 (Com64 x) x)
+	// result: (Const64 [-1])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom64 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
+				continue
+			}
+			v.reset(OpConst64)
+			v.AuxInt = int64ToAuxInt(-1)
+			return true
+		}
+		break
+	}
 	// match: (Add64 (Const64 [1]) (Com64 x))
 	// result: (Neg64 x)
 	for {
@@ -1061,6 +1770,52 @@ func rewriteValuegeneric_OpAdd64(v *Value) bool {
 			v.reset(OpNeg64)
 			v.AddArg(x)
 			return true
+		}
+		break
+	}
+	// match: (Add64 x (Sub64 y x))
+	// result: y
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			x := v_0
+			if v_1.Op != OpSub64 {
+				continue
+			}
+			_ = v_1.Args[1]
+			y := v_1.Args[0]
+			if x != v_1.Args[1] {
+				continue
+			}
+			v.copyOf(y)
+			return true
+		}
+		break
+	}
+	// match: (Add64 x (Add64 y (Sub64 z x)))
+	// result: (Add64 y z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			x := v_0
+			if v_1.Op != OpAdd64 {
+				continue
+			}
+			_ = v_1.Args[1]
+			v_1_0 := v_1.Args[0]
+			v_1_1 := v_1.Args[1]
+			for _i1 := 0; _i1 <= 1; _i1, v_1_0, v_1_1 = _i1+1, v_1_1, v_1_0 {
+				y := v_1_0
+				if v_1_1.Op != OpSub64 {
+					continue
+				}
+				_ = v_1_1.Args[1]
+				z := v_1_1.Args[0]
+				if x != v_1_1.Args[1] {
+					continue
+				}
+				v.reset(OpAdd64)
+				v.AddArg2(y, z)
+				return true
+			}
 		}
 		break
 	}
@@ -1121,33 +1876,6 @@ func rewriteValuegeneric_OpAdd64(v *Value) bool {
 		}
 		break
 	}
-	// match: (Add64 (Sub64 z i:(Const64 <t>)) x)
-	// cond: (z.Op != OpConst64 && x.Op != OpConst64)
-	// result: (Sub64 (Add64 <t> x z) i)
-	for {
-		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
-			if v_0.Op != OpSub64 {
-				continue
-			}
-			_ = v_0.Args[1]
-			z := v_0.Args[0]
-			i := v_0.Args[1]
-			if i.Op != OpConst64 {
-				continue
-			}
-			t := i.Type
-			x := v_1
-			if !(z.Op != OpConst64 && x.Op != OpConst64) {
-				continue
-			}
-			v.reset(OpSub64)
-			v0 := b.NewValue0(v.Pos, OpAdd64, t)
-			v0.AddArg2(x, z)
-			v.AddArg2(v0, i)
-			return true
-		}
-		break
-	}
 	// match: (Add64 (Const64 <t> [c]) (Add64 (Const64 <t> [d]) x))
 	// result: (Add64 (Const64 <t> [c+d]) x)
 	for {
@@ -1204,29 +1932,310 @@ func rewriteValuegeneric_OpAdd64(v *Value) bool {
 		}
 		break
 	}
-	// match: (Add64 (Const64 <t> [c]) (Sub64 x (Const64 <t> [d])))
-	// result: (Add64 (Const64 <t> [c-d]) x)
+	// match: (Add64 (Lsh64x64 x z:(Const64 <t> [c])) (Rsh64Ux64 x (Const64 [d])))
+	// cond: c < 64 && d == 64-c && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
-			if v_0.Op != OpConst64 {
+			if v_0.Op != OpLsh64x64 {
 				continue
 			}
-			t := v_0.Type
-			c := auxIntToInt64(v_0.AuxInt)
-			if v_1.Op != OpSub64 {
+			_ = v_0.Args[1]
+			x := v_0.Args[0]
+			z := v_0.Args[1]
+			if z.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(z.AuxInt)
+			if v_1.Op != OpRsh64Ux64 {
 				continue
 			}
 			_ = v_1.Args[1]
-			x := v_1.Args[0]
+			if x != v_1.Args[0] {
+				continue
+			}
 			v_1_1 := v_1.Args[1]
-			if v_1_1.Op != OpConst64 || v_1_1.Type != t {
+			if v_1_1.Op != OpConst64 {
 				continue
 			}
 			d := auxIntToInt64(v_1_1.AuxInt)
-			v.reset(OpAdd64)
-			v0 := b.NewValue0(v.Pos, OpConst64, t)
-			v0.AuxInt = int64ToAuxInt(c - d)
-			v.AddArg2(v0, x)
+			if !(c < 64 && d == 64-c && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add64 left:(Lsh64x64 x y) right:(Rsh64Ux64 x (Sub64 (Const64 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh64x64 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh64Ux64 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub64 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst64 || auxIntToInt64(right_1_0.AuxInt) != 64 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add64 left:(Lsh64x32 x y) right:(Rsh64Ux32 x (Sub32 (Const32 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh64x32 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh64Ux32 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub32 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst32 || auxIntToInt32(right_1_0.AuxInt) != 64 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add64 left:(Lsh64x16 x y) right:(Rsh64Ux16 x (Sub16 (Const16 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh64x16 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh64Ux16 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub16 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst16 || auxIntToInt16(right_1_0.AuxInt) != 64 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add64 left:(Lsh64x8 x y) right:(Rsh64Ux8 x (Sub8 (Const8 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh64x8 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh64Ux8 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub8 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst8 || auxIntToInt8(right_1_0.AuxInt) != 64 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add64 right:(Rsh64Ux64 x y) left:(Lsh64x64 x z:(Sub64 (Const64 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh64Ux64 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh64x64 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub64 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst64 || auxIntToInt64(z_0.AuxInt) != 64 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add64 right:(Rsh64Ux32 x y) left:(Lsh64x32 x z:(Sub32 (Const32 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh64Ux32 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh64x32 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub32 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst32 || auxIntToInt32(z_0.AuxInt) != 64 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add64 right:(Rsh64Ux16 x y) left:(Lsh64x16 x z:(Sub16 (Const16 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh64Ux16 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh64x16 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub16 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst16 || auxIntToInt16(z_0.AuxInt) != 64 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add64 right:(Rsh64Ux8 x y) left:(Lsh64x8 x z:(Sub8 (Const8 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh64Ux8 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh64x8 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub8 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst8 || auxIntToInt8(z_0.AuxInt) != 64 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
 			return true
 		}
 		break
@@ -1264,6 +2273,7 @@ func rewriteValuegeneric_OpAdd8(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (Add8 (Const8 [c]) (Const8 [d]))
 	// result: (Const8 [c+d])
 	for {
@@ -1330,6 +2340,38 @@ func rewriteValuegeneric_OpAdd8(v *Value) bool {
 		}
 		break
 	}
+	// match: (Add8 x (Neg8 y))
+	// result: (Sub8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			x := v_0
+			if v_1.Op != OpNeg8 {
+				continue
+			}
+			y := v_1.Args[0]
+			v.reset(OpSub8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add8 (Com8 x) x)
+	// result: (Const8 [-1])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom8 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
+				continue
+			}
+			v.reset(OpConst8)
+			v.AuxInt = int8ToAuxInt(-1)
+			return true
+		}
+		break
+	}
 	// match: (Add8 (Const8 [1]) (Com8 x))
 	// result: (Neg8 x)
 	for {
@@ -1341,6 +2383,52 @@ func rewriteValuegeneric_OpAdd8(v *Value) bool {
 			v.reset(OpNeg8)
 			v.AddArg(x)
 			return true
+		}
+		break
+	}
+	// match: (Add8 x (Sub8 y x))
+	// result: y
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			x := v_0
+			if v_1.Op != OpSub8 {
+				continue
+			}
+			_ = v_1.Args[1]
+			y := v_1.Args[0]
+			if x != v_1.Args[1] {
+				continue
+			}
+			v.copyOf(y)
+			return true
+		}
+		break
+	}
+	// match: (Add8 x (Add8 y (Sub8 z x)))
+	// result: (Add8 y z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			x := v_0
+			if v_1.Op != OpAdd8 {
+				continue
+			}
+			_ = v_1.Args[1]
+			v_1_0 := v_1.Args[0]
+			v_1_1 := v_1.Args[1]
+			for _i1 := 0; _i1 <= 1; _i1, v_1_0, v_1_1 = _i1+1, v_1_1, v_1_0 {
+				y := v_1_0
+				if v_1_1.Op != OpSub8 {
+					continue
+				}
+				_ = v_1_1.Args[1]
+				z := v_1_1.Args[0]
+				if x != v_1_1.Args[1] {
+					continue
+				}
+				v.reset(OpAdd8)
+				v.AddArg2(y, z)
+				return true
+			}
 		}
 		break
 	}
@@ -1401,33 +2489,6 @@ func rewriteValuegeneric_OpAdd8(v *Value) bool {
 		}
 		break
 	}
-	// match: (Add8 (Sub8 z i:(Const8 <t>)) x)
-	// cond: (z.Op != OpConst8 && x.Op != OpConst8)
-	// result: (Sub8 (Add8 <t> x z) i)
-	for {
-		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
-			if v_0.Op != OpSub8 {
-				continue
-			}
-			_ = v_0.Args[1]
-			z := v_0.Args[0]
-			i := v_0.Args[1]
-			if i.Op != OpConst8 {
-				continue
-			}
-			t := i.Type
-			x := v_1
-			if !(z.Op != OpConst8 && x.Op != OpConst8) {
-				continue
-			}
-			v.reset(OpSub8)
-			v0 := b.NewValue0(v.Pos, OpAdd8, t)
-			v0.AddArg2(x, z)
-			v.AddArg2(v0, i)
-			return true
-		}
-		break
-	}
 	// match: (Add8 (Const8 <t> [c]) (Add8 (Const8 <t> [d]) x))
 	// result: (Add8 (Const8 <t> [c+d]) x)
 	for {
@@ -1484,29 +2545,310 @@ func rewriteValuegeneric_OpAdd8(v *Value) bool {
 		}
 		break
 	}
-	// match: (Add8 (Const8 <t> [c]) (Sub8 x (Const8 <t> [d])))
-	// result: (Add8 (Const8 <t> [c-d]) x)
+	// match: (Add8 (Lsh8x64 x z:(Const64 <t> [c])) (Rsh8Ux64 x (Const64 [d])))
+	// cond: c < 8 && d == 8-c && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
-			if v_0.Op != OpConst8 {
+			if v_0.Op != OpLsh8x64 {
 				continue
 			}
-			t := v_0.Type
-			c := auxIntToInt8(v_0.AuxInt)
-			if v_1.Op != OpSub8 {
+			_ = v_0.Args[1]
+			x := v_0.Args[0]
+			z := v_0.Args[1]
+			if z.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(z.AuxInt)
+			if v_1.Op != OpRsh8Ux64 {
 				continue
 			}
 			_ = v_1.Args[1]
-			x := v_1.Args[0]
-			v_1_1 := v_1.Args[1]
-			if v_1_1.Op != OpConst8 || v_1_1.Type != t {
+			if x != v_1.Args[0] {
 				continue
 			}
-			d := auxIntToInt8(v_1_1.AuxInt)
-			v.reset(OpAdd8)
-			v0 := b.NewValue0(v.Pos, OpConst8, t)
-			v0.AuxInt = int8ToAuxInt(c - d)
-			v.AddArg2(v0, x)
+			v_1_1 := v_1.Args[1]
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			d := auxIntToInt64(v_1_1.AuxInt)
+			if !(c < 8 && d == 8-c && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add8 left:(Lsh8x64 x y) right:(Rsh8Ux64 x (Sub64 (Const64 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh8x64 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh8Ux64 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub64 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst64 || auxIntToInt64(right_1_0.AuxInt) != 8 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add8 left:(Lsh8x32 x y) right:(Rsh8Ux32 x (Sub32 (Const32 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh8x32 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh8Ux32 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub32 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst32 || auxIntToInt32(right_1_0.AuxInt) != 8 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add8 left:(Lsh8x16 x y) right:(Rsh8Ux16 x (Sub16 (Const16 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh8x16 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh8Ux16 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub16 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst16 || auxIntToInt16(right_1_0.AuxInt) != 8 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add8 left:(Lsh8x8 x y) right:(Rsh8Ux8 x (Sub8 (Const8 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh8x8 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh8Ux8 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub8 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst8 || auxIntToInt8(right_1_0.AuxInt) != 8 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Add8 right:(Rsh8Ux64 x y) left:(Lsh8x64 x z:(Sub64 (Const64 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh8Ux64 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh8x64 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub64 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst64 || auxIntToInt64(z_0.AuxInt) != 8 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add8 right:(Rsh8Ux32 x y) left:(Lsh8x32 x z:(Sub32 (Const32 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh8Ux32 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh8x32 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub32 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst32 || auxIntToInt32(z_0.AuxInt) != 8 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add8 right:(Rsh8Ux16 x y) left:(Lsh8x16 x z:(Sub16 (Const16 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh8Ux16 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh8x16 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub16 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst16 || auxIntToInt16(z_0.AuxInt) != 8 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Add8 right:(Rsh8Ux8 x y) left:(Lsh8x8 x z:(Sub8 (Const8 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh8Ux8 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh8x8 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub8 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst8 || auxIntToInt8(z_0.AuxInt) != 8 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
 			return true
 		}
 		break
@@ -1652,6 +2994,23 @@ func rewriteValuegeneric_OpAnd16(v *Value) bool {
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpConst16 || auxIntToInt16(v_0.AuxInt) != 0 {
+				continue
+			}
+			v.reset(OpConst16)
+			v.AuxInt = int16ToAuxInt(0)
+			return true
+		}
+		break
+	}
+	// match: (And16 (Com16 x) x)
+	// result: (Const16 [0])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom16 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
 				continue
 			}
 			v.reset(OpConst16)
@@ -1858,6 +3217,23 @@ func rewriteValuegeneric_OpAnd32(v *Value) bool {
 		}
 		break
 	}
+	// match: (And32 (Com32 x) x)
+	// result: (Const32 [0])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom32 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
+				continue
+			}
+			v.reset(OpConst32)
+			v.AuxInt = int32ToAuxInt(0)
+			return true
+		}
+		break
+	}
 	// match: (And32 x (And32 x y))
 	// result: (And32 x y)
 	for {
@@ -2056,6 +3432,23 @@ func rewriteValuegeneric_OpAnd64(v *Value) bool {
 		}
 		break
 	}
+	// match: (And64 (Com64 x) x)
+	// result: (Const64 [0])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom64 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
+				continue
+			}
+			v.reset(OpConst64)
+			v.AuxInt = int64ToAuxInt(0)
+			return true
+		}
+		break
+	}
 	// match: (And64 x (And64 x y))
 	// result: (And64 x y)
 	for {
@@ -2246,6 +3639,23 @@ func rewriteValuegeneric_OpAnd8(v *Value) bool {
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpConst8 || auxIntToInt8(v_0.AuxInt) != 0 {
+				continue
+			}
+			v.reset(OpConst8)
+			v.AuxInt = int8ToAuxInt(0)
+			return true
+		}
+		break
+	}
+	// match: (And8 (Com8 x) x)
+	// result: (Const8 [0])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom8 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
 				continue
 			}
 			v.reset(OpConst8)
@@ -3683,6 +5093,21 @@ func rewriteValuegeneric_OpArraySelect(v *Value) bool {
 	}
 	return false
 }
+func rewriteValuegeneric_OpCeil(v *Value) bool {
+	v_0 := v.Args[0]
+	// match: (Ceil (Const64F [c]))
+	// result: (Const64F [math.Ceil(c)])
+	for {
+		if v_0.Op != OpConst64F {
+			break
+		}
+		c := auxIntToFloat64(v_0.AuxInt)
+		v.reset(OpConst64F)
+		v.AuxInt = float64ToAuxInt(math.Ceil(c))
+		return true
+	}
+	return false
+}
 func rewriteValuegeneric_OpCom16(v *Value) bool {
 	v_0 := v.Args[0]
 	// match: (Com16 (Com16 x))
@@ -4297,6 +5722,26 @@ func rewriteValuegeneric_OpCvt64Fto32F(v *Value) bool {
 		c := auxIntToFloat64(v_0.AuxInt)
 		v.reset(OpConst32F)
 		v.AuxInt = float32ToAuxInt(float32(c))
+		return true
+	}
+	// match: (Cvt64Fto32F sqrt0:(Sqrt (Cvt32Fto64F x)))
+	// cond: sqrt0.Uses==1
+	// result: (Sqrt32 x)
+	for {
+		sqrt0 := v_0
+		if sqrt0.Op != OpSqrt {
+			break
+		}
+		sqrt0_0 := sqrt0.Args[0]
+		if sqrt0_0.Op != OpCvt32Fto64F {
+			break
+		}
+		x := sqrt0_0.Args[0]
+		if !(sqrt0.Uses == 1) {
+			break
+		}
+		v.reset(OpSqrt32)
+		v.AddArg(x)
 		return true
 	}
 	return false
@@ -5417,6 +6862,66 @@ func rewriteValuegeneric_OpDiv64u(v *Value) bool {
 		v0 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
 		v0.AuxInt = int64ToAuxInt(63)
 		v.AddArg2(n, v0)
+		return true
+	}
+	// match: (Div64u x (Const64 [c]))
+	// cond: c > 0 && c <= 0xFFFF && umagicOK32(int32(c)) && config.RegSize == 4 && config.useHmul
+	// result: (Add64 (Add64 <typ.UInt64> (Add64 <typ.UInt64> (Lsh64x64 <typ.UInt64> (ZeroExt32to64 (Div32u <typ.UInt32> (Trunc64to32 <typ.UInt32> (Rsh64Ux64 <typ.UInt64> x (Const64 <typ.UInt64> [32]))) (Const32 <typ.UInt32> [int32(c)]))) (Const64 <typ.UInt64> [32])) (ZeroExt32to64 (Div32u <typ.UInt32> (Trunc64to32 <typ.UInt32> x) (Const32 <typ.UInt32> [int32(c)])))) (Mul64 <typ.UInt64> (ZeroExt32to64 <typ.UInt64> (Mod32u <typ.UInt32> (Trunc64to32 <typ.UInt32> (Rsh64Ux64 <typ.UInt64> x (Const64 <typ.UInt64> [32]))) (Const32 <typ.UInt32> [int32(c)]))) (Const64 <typ.UInt64> [int64((1<<32)/c)]))) (ZeroExt32to64 (Div32u <typ.UInt32> (Add32 <typ.UInt32> (Mod32u <typ.UInt32> (Trunc64to32 <typ.UInt32> x) (Const32 <typ.UInt32> [int32(c)])) (Mul32 <typ.UInt32> (Mod32u <typ.UInt32> (Trunc64to32 <typ.UInt32> (Rsh64Ux64 <typ.UInt64> x (Const64 <typ.UInt64> [32]))) (Const32 <typ.UInt32> [int32(c)])) (Const32 <typ.UInt32> [int32((1<<32)%c)]))) (Const32 <typ.UInt32> [int32(c)]))))
+	for {
+		x := v_0
+		if v_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(v_1.AuxInt)
+		if !(c > 0 && c <= 0xFFFF && umagicOK32(int32(c)) && config.RegSize == 4 && config.useHmul) {
+			break
+		}
+		v.reset(OpAdd64)
+		v0 := b.NewValue0(v.Pos, OpAdd64, typ.UInt64)
+		v1 := b.NewValue0(v.Pos, OpAdd64, typ.UInt64)
+		v2 := b.NewValue0(v.Pos, OpLsh64x64, typ.UInt64)
+		v3 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v4 := b.NewValue0(v.Pos, OpDiv32u, typ.UInt32)
+		v5 := b.NewValue0(v.Pos, OpTrunc64to32, typ.UInt32)
+		v6 := b.NewValue0(v.Pos, OpRsh64Ux64, typ.UInt64)
+		v7 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
+		v7.AuxInt = int64ToAuxInt(32)
+		v6.AddArg2(x, v7)
+		v5.AddArg(v6)
+		v8 := b.NewValue0(v.Pos, OpConst32, typ.UInt32)
+		v8.AuxInt = int32ToAuxInt(int32(c))
+		v4.AddArg2(v5, v8)
+		v3.AddArg(v4)
+		v2.AddArg2(v3, v7)
+		v9 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v10 := b.NewValue0(v.Pos, OpDiv32u, typ.UInt32)
+		v11 := b.NewValue0(v.Pos, OpTrunc64to32, typ.UInt32)
+		v11.AddArg(x)
+		v10.AddArg2(v11, v8)
+		v9.AddArg(v10)
+		v1.AddArg2(v2, v9)
+		v12 := b.NewValue0(v.Pos, OpMul64, typ.UInt64)
+		v13 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v14 := b.NewValue0(v.Pos, OpMod32u, typ.UInt32)
+		v14.AddArg2(v5, v8)
+		v13.AddArg(v14)
+		v15 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
+		v15.AuxInt = int64ToAuxInt(int64((1 << 32) / c))
+		v12.AddArg2(v13, v15)
+		v0.AddArg2(v1, v12)
+		v16 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v17 := b.NewValue0(v.Pos, OpDiv32u, typ.UInt32)
+		v18 := b.NewValue0(v.Pos, OpAdd32, typ.UInt32)
+		v19 := b.NewValue0(v.Pos, OpMod32u, typ.UInt32)
+		v19.AddArg2(v11, v8)
+		v20 := b.NewValue0(v.Pos, OpMul32, typ.UInt32)
+		v21 := b.NewValue0(v.Pos, OpConst32, typ.UInt32)
+		v21.AuxInt = int32ToAuxInt(int32((1 << 32) % c))
+		v20.AddArg2(v14, v21)
+		v18.AddArg2(v19, v20)
+		v17.AddArg2(v18, v8)
+		v16.AddArg(v17)
+		v.AddArg2(v0, v16)
 		return true
 	}
 	// match: (Div64u x (Const64 [c]))
@@ -8286,32 +9791,32 @@ func rewriteValuegeneric_OpEqPtr(v *Value) bool {
 		v.AuxInt = boolToAuxInt(true)
 		return true
 	}
-	// match: (EqPtr (Addr {a} _) (Addr {b} _))
-	// result: (ConstBool [a == b])
+	// match: (EqPtr (Addr {x} _) (Addr {y} _))
+	// result: (ConstBool [x == y])
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpAddr {
 				continue
 			}
-			a := auxToSym(v_0.Aux)
+			x := auxToSym(v_0.Aux)
 			if v_1.Op != OpAddr {
 				continue
 			}
-			b := auxToSym(v_1.Aux)
+			y := auxToSym(v_1.Aux)
 			v.reset(OpConstBool)
-			v.AuxInt = boolToAuxInt(a == b)
+			v.AuxInt = boolToAuxInt(x == y)
 			return true
 		}
 		break
 	}
-	// match: (EqPtr (Addr {a} _) (OffPtr [o] (Addr {b} _)))
-	// result: (ConstBool [a == b && o == 0])
+	// match: (EqPtr (Addr {x} _) (OffPtr [o] (Addr {y} _)))
+	// result: (ConstBool [x == y && o == 0])
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpAddr {
 				continue
 			}
-			a := auxToSym(v_0.Aux)
+			x := auxToSym(v_0.Aux)
 			if v_1.Op != OpOffPtr {
 				continue
 			}
@@ -8320,15 +9825,15 @@ func rewriteValuegeneric_OpEqPtr(v *Value) bool {
 			if v_1_0.Op != OpAddr {
 				continue
 			}
-			b := auxToSym(v_1_0.Aux)
+			y := auxToSym(v_1_0.Aux)
 			v.reset(OpConstBool)
-			v.AuxInt = boolToAuxInt(a == b && o == 0)
+			v.AuxInt = boolToAuxInt(x == y && o == 0)
 			return true
 		}
 		break
 	}
-	// match: (EqPtr (OffPtr [o1] (Addr {a} _)) (OffPtr [o2] (Addr {b} _)))
-	// result: (ConstBool [a == b && o1 == o2])
+	// match: (EqPtr (OffPtr [o1] (Addr {x} _)) (OffPtr [o2] (Addr {y} _)))
+	// result: (ConstBool [x == y && o1 == o2])
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpOffPtr {
@@ -8339,7 +9844,7 @@ func rewriteValuegeneric_OpEqPtr(v *Value) bool {
 			if v_0_0.Op != OpAddr {
 				continue
 			}
-			a := auxToSym(v_0_0.Aux)
+			x := auxToSym(v_0_0.Aux)
 			if v_1.Op != OpOffPtr {
 				continue
 			}
@@ -8348,39 +9853,39 @@ func rewriteValuegeneric_OpEqPtr(v *Value) bool {
 			if v_1_0.Op != OpAddr {
 				continue
 			}
-			b := auxToSym(v_1_0.Aux)
+			y := auxToSym(v_1_0.Aux)
 			v.reset(OpConstBool)
-			v.AuxInt = boolToAuxInt(a == b && o1 == o2)
+			v.AuxInt = boolToAuxInt(x == y && o1 == o2)
 			return true
 		}
 		break
 	}
-	// match: (EqPtr (LocalAddr {a} _ _) (LocalAddr {b} _ _))
-	// result: (ConstBool [a == b])
+	// match: (EqPtr (LocalAddr {x} _ _) (LocalAddr {y} _ _))
+	// result: (ConstBool [x == y])
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpLocalAddr {
 				continue
 			}
-			a := auxToSym(v_0.Aux)
+			x := auxToSym(v_0.Aux)
 			if v_1.Op != OpLocalAddr {
 				continue
 			}
-			b := auxToSym(v_1.Aux)
+			y := auxToSym(v_1.Aux)
 			v.reset(OpConstBool)
-			v.AuxInt = boolToAuxInt(a == b)
+			v.AuxInt = boolToAuxInt(x == y)
 			return true
 		}
 		break
 	}
-	// match: (EqPtr (LocalAddr {a} _ _) (OffPtr [o] (LocalAddr {b} _ _)))
-	// result: (ConstBool [a == b && o == 0])
+	// match: (EqPtr (LocalAddr {x} _ _) (OffPtr [o] (LocalAddr {y} _ _)))
+	// result: (ConstBool [x == y && o == 0])
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpLocalAddr {
 				continue
 			}
-			a := auxToSym(v_0.Aux)
+			x := auxToSym(v_0.Aux)
 			if v_1.Op != OpOffPtr {
 				continue
 			}
@@ -8389,15 +9894,15 @@ func rewriteValuegeneric_OpEqPtr(v *Value) bool {
 			if v_1_0.Op != OpLocalAddr {
 				continue
 			}
-			b := auxToSym(v_1_0.Aux)
+			y := auxToSym(v_1_0.Aux)
 			v.reset(OpConstBool)
-			v.AuxInt = boolToAuxInt(a == b && o == 0)
+			v.AuxInt = boolToAuxInt(x == y && o == 0)
 			return true
 		}
 		break
 	}
-	// match: (EqPtr (OffPtr [o1] (LocalAddr {a} _ _)) (OffPtr [o2] (LocalAddr {b} _ _)))
-	// result: (ConstBool [a == b && o1 == o2])
+	// match: (EqPtr (OffPtr [o1] (LocalAddr {x} _ _)) (OffPtr [o2] (LocalAddr {y} _ _)))
+	// result: (ConstBool [x == y && o1 == o2])
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpOffPtr {
@@ -8408,7 +9913,7 @@ func rewriteValuegeneric_OpEqPtr(v *Value) bool {
 			if v_0_0.Op != OpLocalAddr {
 				continue
 			}
-			a := auxToSym(v_0_0.Aux)
+			x := auxToSym(v_0_0.Aux)
 			if v_1.Op != OpOffPtr {
 				continue
 			}
@@ -8417,9 +9922,9 @@ func rewriteValuegeneric_OpEqPtr(v *Value) bool {
 			if v_1_0.Op != OpLocalAddr {
 				continue
 			}
-			b := auxToSym(v_1_0.Aux)
+			y := auxToSym(v_1_0.Aux)
 			v.reset(OpConstBool)
-			v.AuxInt = boolToAuxInt(a == b && o1 == o2)
+			v.AuxInt = boolToAuxInt(x == y && o1 == o2)
 			return true
 		}
 		break
@@ -8663,43 +10168,60 @@ func rewriteValuegeneric_OpEqSlice(v *Value) bool {
 		return true
 	}
 }
+func rewriteValuegeneric_OpFloor(v *Value) bool {
+	v_0 := v.Args[0]
+	// match: (Floor (Const64F [c]))
+	// result: (Const64F [math.Floor(c)])
+	for {
+		if v_0.Op != OpConst64F {
+			break
+		}
+		c := auxIntToFloat64(v_0.AuxInt)
+		v.reset(OpConst64F)
+		v.AuxInt = float64ToAuxInt(math.Floor(c))
+		return true
+	}
+	return false
+}
 func rewriteValuegeneric_OpIMake(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
-	// match: (IMake typ (StructMake1 val))
-	// result: (IMake typ val)
+	// match: (IMake _typ (StructMake1 val))
+	// result: (IMake _typ val)
 	for {
-		typ := v_0
+		_typ := v_0
 		if v_1.Op != OpStructMake1 {
 			break
 		}
 		val := v_1.Args[0]
 		v.reset(OpIMake)
-		v.AddArg2(typ, val)
+		v.AddArg2(_typ, val)
 		return true
 	}
-	// match: (IMake typ (ArrayMake1 val))
-	// result: (IMake typ val)
+	// match: (IMake _typ (ArrayMake1 val))
+	// result: (IMake _typ val)
 	for {
-		typ := v_0
+		_typ := v_0
 		if v_1.Op != OpArrayMake1 {
 			break
 		}
 		val := v_1.Args[0]
 		v.reset(OpIMake)
-		v.AddArg2(typ, val)
+		v.AddArg2(_typ, val)
 		return true
 	}
 	return false
 }
-func rewriteValuegeneric_OpInterCall(v *Value) bool {
-	v_1 := v.Args[1]
-	v_0 := v.Args[0]
-	// match: (InterCall [argsize] (Load (OffPtr [off] (ITab (IMake (Addr {itab} (SB)) _))) _) mem)
-	// cond: devirt(v, itab, off) != nil
-	// result: (StaticCall [int32(argsize)] {devirt(v, itab, off)} mem)
+func rewriteValuegeneric_OpInterLECall(v *Value) bool {
+	// match: (InterLECall [argsize] {auxCall} (Load (OffPtr [off] (ITab (IMake (Addr {itab} (SB)) _))) _) ___)
+	// cond: devirtLESym(v, auxCall, itab, off) != nil
+	// result: devirtLECall(v, devirtLESym(v, auxCall, itab, off))
 	for {
-		argsize := auxIntToInt64(v.AuxInt)
+		if len(v.Args) < 1 {
+			break
+		}
+		auxCall := auxToCall(v.Aux)
+		v_0 := v.Args[0]
 		if v_0.Op != OpLoad {
 			break
 		}
@@ -8722,17 +10244,10 @@ func rewriteValuegeneric_OpInterCall(v *Value) bool {
 		}
 		itab := auxToSym(v_0_0_0_0_0.Aux)
 		v_0_0_0_0_0_0 := v_0_0_0_0_0.Args[0]
-		if v_0_0_0_0_0_0.Op != OpSB {
+		if v_0_0_0_0_0_0.Op != OpSB || !(devirtLESym(v, auxCall, itab, off) != nil) {
 			break
 		}
-		mem := v_1
-		if !(devirt(v, itab, off) != nil) {
-			break
-		}
-		v.reset(OpStaticCall)
-		v.AuxInt = int32ToAuxInt(int32(argsize))
-		v.Aux = symToAux(devirt(v, itab, off))
-		v.AddArg(mem)
+		v.copyOf(devirtLECall(v, devirtLESym(v, auxCall, itab, off)))
 		return true
 	}
 	return false
@@ -9701,6 +11216,16 @@ func rewriteValuegeneric_OpLeq16U(v *Value) bool {
 		v.AuxInt = boolToAuxInt(uint16(c) <= uint16(d))
 		return true
 	}
+	// match: (Leq16U (Const16 [0]) _)
+	// result: (ConstBool [true])
+	for {
+		if v_0.Op != OpConst16 || auxIntToInt16(v_0.AuxInt) != 0 {
+			break
+		}
+		v.reset(OpConstBool)
+		v.AuxInt = boolToAuxInt(true)
+		return true
+	}
 	return false
 }
 func rewriteValuegeneric_OpLeq32(v *Value) bool {
@@ -9803,6 +11328,16 @@ func rewriteValuegeneric_OpLeq32U(v *Value) bool {
 		d := auxIntToInt32(v_1.AuxInt)
 		v.reset(OpConstBool)
 		v.AuxInt = boolToAuxInt(uint32(c) <= uint32(d))
+		return true
+	}
+	// match: (Leq32U (Const32 [0]) _)
+	// result: (ConstBool [true])
+	for {
+		if v_0.Op != OpConst32 || auxIntToInt32(v_0.AuxInt) != 0 {
+			break
+		}
+		v.reset(OpConstBool)
+		v.AuxInt = boolToAuxInt(true)
 		return true
 	}
 	return false
@@ -9909,6 +11444,16 @@ func rewriteValuegeneric_OpLeq64U(v *Value) bool {
 		v.AuxInt = boolToAuxInt(uint64(c) <= uint64(d))
 		return true
 	}
+	// match: (Leq64U (Const64 [0]) _)
+	// result: (ConstBool [true])
+	for {
+		if v_0.Op != OpConst64 || auxIntToInt64(v_0.AuxInt) != 0 {
+			break
+		}
+		v.reset(OpConstBool)
+		v.AuxInt = boolToAuxInt(true)
+		return true
+	}
 	return false
 }
 func rewriteValuegeneric_OpLeq8(v *Value) bool {
@@ -9993,11 +11538,22 @@ func rewriteValuegeneric_OpLeq8U(v *Value) bool {
 		v.AuxInt = boolToAuxInt(uint8(c) <= uint8(d))
 		return true
 	}
+	// match: (Leq8U (Const8 [0]) _)
+	// result: (ConstBool [true])
+	for {
+		if v_0.Op != OpConst8 || auxIntToInt8(v_0.AuxInt) != 0 {
+			break
+		}
+		v.reset(OpConstBool)
+		v.AuxInt = boolToAuxInt(true)
+		return true
+	}
 	return false
 }
 func rewriteValuegeneric_OpLess16(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
+	b := v.Block
 	// match: (Less16 (Const16 [c]) (Const16 [d]))
 	// result: (ConstBool [c < d])
 	for {
@@ -10011,6 +11567,45 @@ func rewriteValuegeneric_OpLess16(v *Value) bool {
 		d := auxIntToInt16(v_1.AuxInt)
 		v.reset(OpConstBool)
 		v.AuxInt = boolToAuxInt(c < d)
+		return true
+	}
+	// match: (Less16 (Const16 <t> [0]) x)
+	// cond: isNonNegative(x)
+	// result: (Neq16 (Const16 <t> [0]) x)
+	for {
+		if v_0.Op != OpConst16 {
+			break
+		}
+		t := v_0.Type
+		if auxIntToInt16(v_0.AuxInt) != 0 {
+			break
+		}
+		x := v_1
+		if !(isNonNegative(x)) {
+			break
+		}
+		v.reset(OpNeq16)
+		v0 := b.NewValue0(v.Pos, OpConst16, t)
+		v0.AuxInt = int16ToAuxInt(0)
+		v.AddArg2(v0, x)
+		return true
+	}
+	// match: (Less16 x (Const16 <t> [1]))
+	// cond: isNonNegative(x)
+	// result: (Eq16 (Const16 <t> [0]) x)
+	for {
+		x := v_0
+		if v_1.Op != OpConst16 {
+			break
+		}
+		t := v_1.Type
+		if auxIntToInt16(v_1.AuxInt) != 1 || !(isNonNegative(x)) {
+			break
+		}
+		v.reset(OpEq16)
+		v0 := b.NewValue0(v.Pos, OpConst16, t)
+		v0.AuxInt = int16ToAuxInt(0)
+		v.AddArg2(v0, x)
 		return true
 	}
 	return false
@@ -10033,11 +11628,22 @@ func rewriteValuegeneric_OpLess16U(v *Value) bool {
 		v.AuxInt = boolToAuxInt(uint16(c) < uint16(d))
 		return true
 	}
+	// match: (Less16U _ (Const16 [0]))
+	// result: (ConstBool [false])
+	for {
+		if v_1.Op != OpConst16 || auxIntToInt16(v_1.AuxInt) != 0 {
+			break
+		}
+		v.reset(OpConstBool)
+		v.AuxInt = boolToAuxInt(false)
+		return true
+	}
 	return false
 }
 func rewriteValuegeneric_OpLess32(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
+	b := v.Block
 	// match: (Less32 (Const32 [c]) (Const32 [d]))
 	// result: (ConstBool [c < d])
 	for {
@@ -10051,6 +11657,45 @@ func rewriteValuegeneric_OpLess32(v *Value) bool {
 		d := auxIntToInt32(v_1.AuxInt)
 		v.reset(OpConstBool)
 		v.AuxInt = boolToAuxInt(c < d)
+		return true
+	}
+	// match: (Less32 (Const32 <t> [0]) x)
+	// cond: isNonNegative(x)
+	// result: (Neq32 (Const32 <t> [0]) x)
+	for {
+		if v_0.Op != OpConst32 {
+			break
+		}
+		t := v_0.Type
+		if auxIntToInt32(v_0.AuxInt) != 0 {
+			break
+		}
+		x := v_1
+		if !(isNonNegative(x)) {
+			break
+		}
+		v.reset(OpNeq32)
+		v0 := b.NewValue0(v.Pos, OpConst32, t)
+		v0.AuxInt = int32ToAuxInt(0)
+		v.AddArg2(v0, x)
+		return true
+	}
+	// match: (Less32 x (Const32 <t> [1]))
+	// cond: isNonNegative(x)
+	// result: (Eq32 (Const32 <t> [0]) x)
+	for {
+		x := v_0
+		if v_1.Op != OpConst32 {
+			break
+		}
+		t := v_1.Type
+		if auxIntToInt32(v_1.AuxInt) != 1 || !(isNonNegative(x)) {
+			break
+		}
+		v.reset(OpEq32)
+		v0 := b.NewValue0(v.Pos, OpConst32, t)
+		v0.AuxInt = int32ToAuxInt(0)
+		v.AddArg2(v0, x)
 		return true
 	}
 	return false
@@ -10093,11 +11738,22 @@ func rewriteValuegeneric_OpLess32U(v *Value) bool {
 		v.AuxInt = boolToAuxInt(uint32(c) < uint32(d))
 		return true
 	}
+	// match: (Less32U _ (Const32 [0]))
+	// result: (ConstBool [false])
+	for {
+		if v_1.Op != OpConst32 || auxIntToInt32(v_1.AuxInt) != 0 {
+			break
+		}
+		v.reset(OpConstBool)
+		v.AuxInt = boolToAuxInt(false)
+		return true
+	}
 	return false
 }
 func rewriteValuegeneric_OpLess64(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
+	b := v.Block
 	// match: (Less64 (Const64 [c]) (Const64 [d]))
 	// result: (ConstBool [c < d])
 	for {
@@ -10111,6 +11767,45 @@ func rewriteValuegeneric_OpLess64(v *Value) bool {
 		d := auxIntToInt64(v_1.AuxInt)
 		v.reset(OpConstBool)
 		v.AuxInt = boolToAuxInt(c < d)
+		return true
+	}
+	// match: (Less64 (Const64 <t> [0]) x)
+	// cond: isNonNegative(x)
+	// result: (Neq64 (Const64 <t> [0]) x)
+	for {
+		if v_0.Op != OpConst64 {
+			break
+		}
+		t := v_0.Type
+		if auxIntToInt64(v_0.AuxInt) != 0 {
+			break
+		}
+		x := v_1
+		if !(isNonNegative(x)) {
+			break
+		}
+		v.reset(OpNeq64)
+		v0 := b.NewValue0(v.Pos, OpConst64, t)
+		v0.AuxInt = int64ToAuxInt(0)
+		v.AddArg2(v0, x)
+		return true
+	}
+	// match: (Less64 x (Const64 <t> [1]))
+	// cond: isNonNegative(x)
+	// result: (Eq64 (Const64 <t> [0]) x)
+	for {
+		x := v_0
+		if v_1.Op != OpConst64 {
+			break
+		}
+		t := v_1.Type
+		if auxIntToInt64(v_1.AuxInt) != 1 || !(isNonNegative(x)) {
+			break
+		}
+		v.reset(OpEq64)
+		v0 := b.NewValue0(v.Pos, OpConst64, t)
+		v0.AuxInt = int64ToAuxInt(0)
+		v.AddArg2(v0, x)
 		return true
 	}
 	return false
@@ -10153,11 +11848,22 @@ func rewriteValuegeneric_OpLess64U(v *Value) bool {
 		v.AuxInt = boolToAuxInt(uint64(c) < uint64(d))
 		return true
 	}
+	// match: (Less64U _ (Const64 [0]))
+	// result: (ConstBool [false])
+	for {
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != 0 {
+			break
+		}
+		v.reset(OpConstBool)
+		v.AuxInt = boolToAuxInt(false)
+		return true
+	}
 	return false
 }
 func rewriteValuegeneric_OpLess8(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
+	b := v.Block
 	// match: (Less8 (Const8 [c]) (Const8 [d]))
 	// result: (ConstBool [c < d])
 	for {
@@ -10171,6 +11877,45 @@ func rewriteValuegeneric_OpLess8(v *Value) bool {
 		d := auxIntToInt8(v_1.AuxInt)
 		v.reset(OpConstBool)
 		v.AuxInt = boolToAuxInt(c < d)
+		return true
+	}
+	// match: (Less8 (Const8 <t> [0]) x)
+	// cond: isNonNegative(x)
+	// result: (Neq8 (Const8 <t> [0]) x)
+	for {
+		if v_0.Op != OpConst8 {
+			break
+		}
+		t := v_0.Type
+		if auxIntToInt8(v_0.AuxInt) != 0 {
+			break
+		}
+		x := v_1
+		if !(isNonNegative(x)) {
+			break
+		}
+		v.reset(OpNeq8)
+		v0 := b.NewValue0(v.Pos, OpConst8, t)
+		v0.AuxInt = int8ToAuxInt(0)
+		v.AddArg2(v0, x)
+		return true
+	}
+	// match: (Less8 x (Const8 <t> [1]))
+	// cond: isNonNegative(x)
+	// result: (Eq8 (Const8 <t> [0]) x)
+	for {
+		x := v_0
+		if v_1.Op != OpConst8 {
+			break
+		}
+		t := v_1.Type
+		if auxIntToInt8(v_1.AuxInt) != 1 || !(isNonNegative(x)) {
+			break
+		}
+		v.reset(OpEq8)
+		v0 := b.NewValue0(v.Pos, OpConst8, t)
+		v0.AuxInt = int8ToAuxInt(0)
+		v.AddArg2(v0, x)
 		return true
 	}
 	return false
@@ -10191,6 +11936,16 @@ func rewriteValuegeneric_OpLess8U(v *Value) bool {
 		d := auxIntToInt8(v_1.AuxInt)
 		v.reset(OpConstBool)
 		v.AuxInt = boolToAuxInt(uint8(c) < uint8(d))
+		return true
+	}
+	// match: (Less8U _ (Const8 [0]))
+	// result: (ConstBool [false])
+	for {
+		if v_1.Op != OpConst8 || auxIntToInt8(v_1.AuxInt) != 0 {
+			break
+		}
+		v.reset(OpConstBool)
+		v.AuxInt = boolToAuxInt(false)
 		return true
 	}
 	return false
@@ -11037,6 +12792,54 @@ func rewriteValuegeneric_OpLsh16x64(v *Value) bool {
 		v.AddArg2(x, v0)
 		return true
 	}
+	// match: (Lsh16x64 i:(Rsh16x64 x (Const64 [c])) (Const64 [c]))
+	// cond: c >= 0 && c < 16 && i.Uses == 1
+	// result: (And16 x (Const16 <v.Type> [int16(-1) << c]))
+	for {
+		i := v_0
+		if i.Op != OpRsh16x64 {
+			break
+		}
+		_ = i.Args[1]
+		x := i.Args[0]
+		i_1 := i.Args[1]
+		if i_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(i_1.AuxInt)
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || !(c >= 0 && c < 16 && i.Uses == 1) {
+			break
+		}
+		v.reset(OpAnd16)
+		v0 := b.NewValue0(v.Pos, OpConst16, v.Type)
+		v0.AuxInt = int16ToAuxInt(int16(-1) << c)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (Lsh16x64 i:(Rsh16Ux64 x (Const64 [c])) (Const64 [c]))
+	// cond: c >= 0 && c < 16 && i.Uses == 1
+	// result: (And16 x (Const16 <v.Type> [int16(-1) << c]))
+	for {
+		i := v_0
+		if i.Op != OpRsh16Ux64 {
+			break
+		}
+		_ = i.Args[1]
+		x := i.Args[0]
+		i_1 := i.Args[1]
+		if i_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(i_1.AuxInt)
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || !(c >= 0 && c < 16 && i.Uses == 1) {
+			break
+		}
+		v.reset(OpAnd16)
+		v0 := b.NewValue0(v.Pos, OpConst16, v.Type)
+		v0.AuxInt = int16ToAuxInt(int16(-1) << c)
+		v.AddArg2(x, v0)
+		return true
+	}
 	// match: (Lsh16x64 (Rsh16Ux64 (Lsh16x64 x (Const64 [c1])) (Const64 [c2])) (Const64 [c3]))
 	// cond: uint64(c1) >= uint64(c2) && uint64(c3) >= uint64(c2) && !uaddOvf(c1-c2, c3)
 	// result: (Lsh16x64 x (Const64 <typ.UInt64> [c1-c2+c3]))
@@ -11249,6 +13052,54 @@ func rewriteValuegeneric_OpLsh32x64(v *Value) bool {
 		v.reset(OpLsh32x64)
 		v0 := b.NewValue0(v.Pos, OpConst64, t)
 		v0.AuxInt = int64ToAuxInt(c + d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (Lsh32x64 i:(Rsh32x64 x (Const64 [c])) (Const64 [c]))
+	// cond: c >= 0 && c < 32 && i.Uses == 1
+	// result: (And32 x (Const32 <v.Type> [int32(-1) << c]))
+	for {
+		i := v_0
+		if i.Op != OpRsh32x64 {
+			break
+		}
+		_ = i.Args[1]
+		x := i.Args[0]
+		i_1 := i.Args[1]
+		if i_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(i_1.AuxInt)
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || !(c >= 0 && c < 32 && i.Uses == 1) {
+			break
+		}
+		v.reset(OpAnd32)
+		v0 := b.NewValue0(v.Pos, OpConst32, v.Type)
+		v0.AuxInt = int32ToAuxInt(int32(-1) << c)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (Lsh32x64 i:(Rsh32Ux64 x (Const64 [c])) (Const64 [c]))
+	// cond: c >= 0 && c < 32 && i.Uses == 1
+	// result: (And32 x (Const32 <v.Type> [int32(-1) << c]))
+	for {
+		i := v_0
+		if i.Op != OpRsh32Ux64 {
+			break
+		}
+		_ = i.Args[1]
+		x := i.Args[0]
+		i_1 := i.Args[1]
+		if i_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(i_1.AuxInt)
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || !(c >= 0 && c < 32 && i.Uses == 1) {
+			break
+		}
+		v.reset(OpAnd32)
+		v0 := b.NewValue0(v.Pos, OpConst32, v.Type)
+		v0.AuxInt = int32ToAuxInt(int32(-1) << c)
 		v.AddArg2(x, v0)
 		return true
 	}
@@ -11467,6 +13318,54 @@ func rewriteValuegeneric_OpLsh64x64(v *Value) bool {
 		v.AddArg2(x, v0)
 		return true
 	}
+	// match: (Lsh64x64 i:(Rsh64x64 x (Const64 [c])) (Const64 [c]))
+	// cond: c >= 0 && c < 64 && i.Uses == 1
+	// result: (And64 x (Const64 <v.Type> [int64(-1) << c]))
+	for {
+		i := v_0
+		if i.Op != OpRsh64x64 {
+			break
+		}
+		_ = i.Args[1]
+		x := i.Args[0]
+		i_1 := i.Args[1]
+		if i_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(i_1.AuxInt)
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || !(c >= 0 && c < 64 && i.Uses == 1) {
+			break
+		}
+		v.reset(OpAnd64)
+		v0 := b.NewValue0(v.Pos, OpConst64, v.Type)
+		v0.AuxInt = int64ToAuxInt(int64(-1) << c)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (Lsh64x64 i:(Rsh64Ux64 x (Const64 [c])) (Const64 [c]))
+	// cond: c >= 0 && c < 64 && i.Uses == 1
+	// result: (And64 x (Const64 <v.Type> [int64(-1) << c]))
+	for {
+		i := v_0
+		if i.Op != OpRsh64Ux64 {
+			break
+		}
+		_ = i.Args[1]
+		x := i.Args[0]
+		i_1 := i.Args[1]
+		if i_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(i_1.AuxInt)
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || !(c >= 0 && c < 64 && i.Uses == 1) {
+			break
+		}
+		v.reset(OpAnd64)
+		v0 := b.NewValue0(v.Pos, OpConst64, v.Type)
+		v0.AuxInt = int64ToAuxInt(int64(-1) << c)
+		v.AddArg2(x, v0)
+		return true
+	}
 	// match: (Lsh64x64 (Rsh64Ux64 (Lsh64x64 x (Const64 [c1])) (Const64 [c2])) (Const64 [c3]))
 	// cond: uint64(c1) >= uint64(c2) && uint64(c3) >= uint64(c2) && !uaddOvf(c1-c2, c3)
 	// result: (Lsh64x64 x (Const64 <typ.UInt64> [c1-c2+c3]))
@@ -11679,6 +13578,54 @@ func rewriteValuegeneric_OpLsh8x64(v *Value) bool {
 		v.reset(OpLsh8x64)
 		v0 := b.NewValue0(v.Pos, OpConst64, t)
 		v0.AuxInt = int64ToAuxInt(c + d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (Lsh8x64 i:(Rsh8x64 x (Const64 [c])) (Const64 [c]))
+	// cond: c >= 0 && c < 8 && i.Uses == 1
+	// result: (And8 x (Const8 <v.Type> [int8(-1) << c]))
+	for {
+		i := v_0
+		if i.Op != OpRsh8x64 {
+			break
+		}
+		_ = i.Args[1]
+		x := i.Args[0]
+		i_1 := i.Args[1]
+		if i_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(i_1.AuxInt)
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || !(c >= 0 && c < 8 && i.Uses == 1) {
+			break
+		}
+		v.reset(OpAnd8)
+		v0 := b.NewValue0(v.Pos, OpConst8, v.Type)
+		v0.AuxInt = int8ToAuxInt(int8(-1) << c)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (Lsh8x64 i:(Rsh8Ux64 x (Const64 [c])) (Const64 [c]))
+	// cond: c >= 0 && c < 8 && i.Uses == 1
+	// result: (And8 x (Const8 <v.Type> [int8(-1) << c]))
+	for {
+		i := v_0
+		if i.Op != OpRsh8Ux64 {
+			break
+		}
+		_ = i.Args[1]
+		x := i.Args[0]
+		i_1 := i.Args[1]
+		if i_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(i_1.AuxInt)
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || !(c >= 0 && c < 8 && i.Uses == 1) {
+			break
+		}
+		v.reset(OpAnd8)
+		v0 := b.NewValue0(v.Pos, OpConst8, v.Type)
+		v0.AuxInt = int8ToAuxInt(int8(-1) << c)
 		v.AddArg2(x, v0)
 		return true
 	}
@@ -13666,7 +15613,7 @@ func rewriteValuegeneric_OpMove(v *Value) bool {
 		return true
 	}
 	// match: (Move {t1} [s] dst tmp1 midmem:(Move {t2} [s] tmp2 src _))
-	// cond: t1.Compare(t2) == types.CMPeq && isSamePtr(tmp1, tmp2) && isStackPtr(src) && disjoint(src, s, tmp2, s) && (disjoint(src, s, dst, s) || isInlinableMemmove(dst, src, s, config))
+	// cond: t1.Compare(t2) == types.CMPeq && isSamePtr(tmp1, tmp2) && isStackPtr(src) && !isVolatile(src) && disjoint(src, s, tmp2, s) && (disjoint(src, s, dst, s) || isInlinableMemmove(dst, src, s, config))
 	// result: (Move {t1} [s] dst src midmem)
 	for {
 		s := auxIntToInt64(v.AuxInt)
@@ -13680,7 +15627,7 @@ func rewriteValuegeneric_OpMove(v *Value) bool {
 		t2 := auxToType(midmem.Aux)
 		src := midmem.Args[1]
 		tmp2 := midmem.Args[0]
-		if !(t1.Compare(t2) == types.CMPeq && isSamePtr(tmp1, tmp2) && isStackPtr(src) && disjoint(src, s, tmp2, s) && (disjoint(src, s, dst, s) || isInlinableMemmove(dst, src, s, config))) {
+		if !(t1.Compare(t2) == types.CMPeq && isSamePtr(tmp1, tmp2) && isStackPtr(src) && !isVolatile(src) && disjoint(src, s, tmp2, s) && (disjoint(src, s, dst, s) || isInlinableMemmove(dst, src, s, config))) {
 			break
 		}
 		v.reset(OpMove)
@@ -13690,7 +15637,7 @@ func rewriteValuegeneric_OpMove(v *Value) bool {
 		return true
 	}
 	// match: (Move {t1} [s] dst tmp1 midmem:(VarDef (Move {t2} [s] tmp2 src _)))
-	// cond: t1.Compare(t2) == types.CMPeq && isSamePtr(tmp1, tmp2) && isStackPtr(src) && disjoint(src, s, tmp2, s) && (disjoint(src, s, dst, s) || isInlinableMemmove(dst, src, s, config))
+	// cond: t1.Compare(t2) == types.CMPeq && isSamePtr(tmp1, tmp2) && isStackPtr(src) && !isVolatile(src) && disjoint(src, s, tmp2, s) && (disjoint(src, s, dst, s) || isInlinableMemmove(dst, src, s, config))
 	// result: (Move {t1} [s] dst src midmem)
 	for {
 		s := auxIntToInt64(v.AuxInt)
@@ -13708,7 +15655,7 @@ func rewriteValuegeneric_OpMove(v *Value) bool {
 		t2 := auxToType(midmem_0.Aux)
 		src := midmem_0.Args[1]
 		tmp2 := midmem_0.Args[0]
-		if !(t1.Compare(t2) == types.CMPeq && isSamePtr(tmp1, tmp2) && isStackPtr(src) && disjoint(src, s, tmp2, s) && (disjoint(src, s, dst, s) || isInlinableMemmove(dst, src, s, config))) {
+		if !(t1.Compare(t2) == types.CMPeq && isSamePtr(tmp1, tmp2) && isStackPtr(src) && !isVolatile(src) && disjoint(src, s, tmp2, s) && (disjoint(src, s, dst, s) || isInlinableMemmove(dst, src, s, config))) {
 			break
 		}
 		v.reset(OpMove)
@@ -13839,6 +15786,37 @@ func rewriteValuegeneric_OpMul16(v *Value) bool {
 			v.reset(OpConst16)
 			v.AuxInt = int16ToAuxInt(0)
 			return true
+		}
+		break
+	}
+	// match: (Mul16 (Mul16 i:(Const16 <t>) z) x)
+	// cond: (z.Op != OpConst16 && x.Op != OpConst16)
+	// result: (Mul16 i (Mul16 <t> x z))
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpMul16 {
+				continue
+			}
+			_ = v_0.Args[1]
+			v_0_0 := v_0.Args[0]
+			v_0_1 := v_0.Args[1]
+			for _i1 := 0; _i1 <= 1; _i1, v_0_0, v_0_1 = _i1+1, v_0_1, v_0_0 {
+				i := v_0_0
+				if i.Op != OpConst16 {
+					continue
+				}
+				t := i.Type
+				z := v_0_1
+				x := v_1
+				if !(z.Op != OpConst16 && x.Op != OpConst16) {
+					continue
+				}
+				v.reset(OpMul16)
+				v0 := b.NewValue0(v.Pos, OpMul16, t)
+				v0.AddArg2(x, z)
+				v.AddArg2(i, v0)
+				return true
+			}
 		}
 		break
 	}
@@ -14015,6 +15993,37 @@ func rewriteValuegeneric_OpMul32(v *Value) bool {
 			v.reset(OpConst32)
 			v.AuxInt = int32ToAuxInt(0)
 			return true
+		}
+		break
+	}
+	// match: (Mul32 (Mul32 i:(Const32 <t>) z) x)
+	// cond: (z.Op != OpConst32 && x.Op != OpConst32)
+	// result: (Mul32 i (Mul32 <t> x z))
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpMul32 {
+				continue
+			}
+			_ = v_0.Args[1]
+			v_0_0 := v_0.Args[0]
+			v_0_1 := v_0.Args[1]
+			for _i1 := 0; _i1 <= 1; _i1, v_0_0, v_0_1 = _i1+1, v_0_1, v_0_0 {
+				i := v_0_0
+				if i.Op != OpConst32 {
+					continue
+				}
+				t := i.Type
+				z := v_0_1
+				x := v_1
+				if !(z.Op != OpConst32 && x.Op != OpConst32) {
+					continue
+				}
+				v.reset(OpMul32)
+				v0 := b.NewValue0(v.Pos, OpMul32, t)
+				v0.AddArg2(x, z)
+				v.AddArg2(i, v0)
+				return true
+			}
 		}
 		break
 	}
@@ -14262,6 +16271,37 @@ func rewriteValuegeneric_OpMul64(v *Value) bool {
 		}
 		break
 	}
+	// match: (Mul64 (Mul64 i:(Const64 <t>) z) x)
+	// cond: (z.Op != OpConst64 && x.Op != OpConst64)
+	// result: (Mul64 i (Mul64 <t> x z))
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpMul64 {
+				continue
+			}
+			_ = v_0.Args[1]
+			v_0_0 := v_0.Args[0]
+			v_0_1 := v_0.Args[1]
+			for _i1 := 0; _i1 <= 1; _i1, v_0_0, v_0_1 = _i1+1, v_0_1, v_0_0 {
+				i := v_0_0
+				if i.Op != OpConst64 {
+					continue
+				}
+				t := i.Type
+				z := v_0_1
+				x := v_1
+				if !(z.Op != OpConst64 && x.Op != OpConst64) {
+					continue
+				}
+				v.reset(OpMul64)
+				v0 := b.NewValue0(v.Pos, OpMul64, t)
+				v0.AddArg2(x, z)
+				v.AddArg2(i, v0)
+				return true
+			}
+		}
+		break
+	}
 	// match: (Mul64 (Const64 <t> [c]) (Mul64 (Const64 <t> [d]) x))
 	// result: (Mul64 (Const64 <t> [c*d]) x)
 	for {
@@ -14469,6 +16509,37 @@ func rewriteValuegeneric_OpMul8(v *Value) bool {
 			v.reset(OpConst8)
 			v.AuxInt = int8ToAuxInt(0)
 			return true
+		}
+		break
+	}
+	// match: (Mul8 (Mul8 i:(Const8 <t>) z) x)
+	// cond: (z.Op != OpConst8 && x.Op != OpConst8)
+	// result: (Mul8 i (Mul8 <t> x z))
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpMul8 {
+				continue
+			}
+			_ = v_0.Args[1]
+			v_0_0 := v_0.Args[0]
+			v_0_1 := v_0.Args[1]
+			for _i1 := 0; _i1 <= 1; _i1, v_0_0, v_0_1 = _i1+1, v_0_1, v_0_0 {
+				i := v_0_0
+				if i.Op != OpConst8 {
+					continue
+				}
+				t := i.Type
+				z := v_0_1
+				x := v_1
+				if !(z.Op != OpConst8 && x.Op != OpConst8) {
+					continue
+				}
+				v.reset(OpMul8)
+				v0 := b.NewValue0(v.Pos, OpMul8, t)
+				v0.AddArg2(x, z)
+				v.AddArg2(i, v0)
+				return true
+			}
 		}
 		break
 	}
@@ -15645,32 +17716,32 @@ func rewriteValuegeneric_OpNeqPtr(v *Value) bool {
 		v.AuxInt = boolToAuxInt(false)
 		return true
 	}
-	// match: (NeqPtr (Addr {a} _) (Addr {b} _))
-	// result: (ConstBool [a != b])
+	// match: (NeqPtr (Addr {x} _) (Addr {y} _))
+	// result: (ConstBool [x != y])
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpAddr {
 				continue
 			}
-			a := auxToSym(v_0.Aux)
+			x := auxToSym(v_0.Aux)
 			if v_1.Op != OpAddr {
 				continue
 			}
-			b := auxToSym(v_1.Aux)
+			y := auxToSym(v_1.Aux)
 			v.reset(OpConstBool)
-			v.AuxInt = boolToAuxInt(a != b)
+			v.AuxInt = boolToAuxInt(x != y)
 			return true
 		}
 		break
 	}
-	// match: (NeqPtr (Addr {a} _) (OffPtr [o] (Addr {b} _)))
-	// result: (ConstBool [a != b || o != 0])
+	// match: (NeqPtr (Addr {x} _) (OffPtr [o] (Addr {y} _)))
+	// result: (ConstBool [x != y || o != 0])
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpAddr {
 				continue
 			}
-			a := auxToSym(v_0.Aux)
+			x := auxToSym(v_0.Aux)
 			if v_1.Op != OpOffPtr {
 				continue
 			}
@@ -15679,15 +17750,15 @@ func rewriteValuegeneric_OpNeqPtr(v *Value) bool {
 			if v_1_0.Op != OpAddr {
 				continue
 			}
-			b := auxToSym(v_1_0.Aux)
+			y := auxToSym(v_1_0.Aux)
 			v.reset(OpConstBool)
-			v.AuxInt = boolToAuxInt(a != b || o != 0)
+			v.AuxInt = boolToAuxInt(x != y || o != 0)
 			return true
 		}
 		break
 	}
-	// match: (NeqPtr (OffPtr [o1] (Addr {a} _)) (OffPtr [o2] (Addr {b} _)))
-	// result: (ConstBool [a != b || o1 != o2])
+	// match: (NeqPtr (OffPtr [o1] (Addr {x} _)) (OffPtr [o2] (Addr {y} _)))
+	// result: (ConstBool [x != y || o1 != o2])
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpOffPtr {
@@ -15698,7 +17769,7 @@ func rewriteValuegeneric_OpNeqPtr(v *Value) bool {
 			if v_0_0.Op != OpAddr {
 				continue
 			}
-			a := auxToSym(v_0_0.Aux)
+			x := auxToSym(v_0_0.Aux)
 			if v_1.Op != OpOffPtr {
 				continue
 			}
@@ -15707,39 +17778,39 @@ func rewriteValuegeneric_OpNeqPtr(v *Value) bool {
 			if v_1_0.Op != OpAddr {
 				continue
 			}
-			b := auxToSym(v_1_0.Aux)
+			y := auxToSym(v_1_0.Aux)
 			v.reset(OpConstBool)
-			v.AuxInt = boolToAuxInt(a != b || o1 != o2)
+			v.AuxInt = boolToAuxInt(x != y || o1 != o2)
 			return true
 		}
 		break
 	}
-	// match: (NeqPtr (LocalAddr {a} _ _) (LocalAddr {b} _ _))
-	// result: (ConstBool [a != b])
+	// match: (NeqPtr (LocalAddr {x} _ _) (LocalAddr {y} _ _))
+	// result: (ConstBool [x != y])
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpLocalAddr {
 				continue
 			}
-			a := auxToSym(v_0.Aux)
+			x := auxToSym(v_0.Aux)
 			if v_1.Op != OpLocalAddr {
 				continue
 			}
-			b := auxToSym(v_1.Aux)
+			y := auxToSym(v_1.Aux)
 			v.reset(OpConstBool)
-			v.AuxInt = boolToAuxInt(a != b)
+			v.AuxInt = boolToAuxInt(x != y)
 			return true
 		}
 		break
 	}
-	// match: (NeqPtr (LocalAddr {a} _ _) (OffPtr [o] (LocalAddr {b} _ _)))
-	// result: (ConstBool [a != b || o != 0])
+	// match: (NeqPtr (LocalAddr {x} _ _) (OffPtr [o] (LocalAddr {y} _ _)))
+	// result: (ConstBool [x != y || o != 0])
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpLocalAddr {
 				continue
 			}
-			a := auxToSym(v_0.Aux)
+			x := auxToSym(v_0.Aux)
 			if v_1.Op != OpOffPtr {
 				continue
 			}
@@ -15748,15 +17819,15 @@ func rewriteValuegeneric_OpNeqPtr(v *Value) bool {
 			if v_1_0.Op != OpLocalAddr {
 				continue
 			}
-			b := auxToSym(v_1_0.Aux)
+			y := auxToSym(v_1_0.Aux)
 			v.reset(OpConstBool)
-			v.AuxInt = boolToAuxInt(a != b || o != 0)
+			v.AuxInt = boolToAuxInt(x != y || o != 0)
 			return true
 		}
 		break
 	}
-	// match: (NeqPtr (OffPtr [o1] (LocalAddr {a} _ _)) (OffPtr [o2] (LocalAddr {b} _ _)))
-	// result: (ConstBool [a != b || o1 != o2])
+	// match: (NeqPtr (OffPtr [o1] (LocalAddr {x} _ _)) (OffPtr [o2] (LocalAddr {y} _ _)))
+	// result: (ConstBool [x != y || o1 != o2])
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpOffPtr {
@@ -15767,7 +17838,7 @@ func rewriteValuegeneric_OpNeqPtr(v *Value) bool {
 			if v_0_0.Op != OpLocalAddr {
 				continue
 			}
-			a := auxToSym(v_0_0.Aux)
+			x := auxToSym(v_0_0.Aux)
 			if v_1.Op != OpOffPtr {
 				continue
 			}
@@ -15776,9 +17847,9 @@ func rewriteValuegeneric_OpNeqPtr(v *Value) bool {
 			if v_1_0.Op != OpLocalAddr {
 				continue
 			}
-			b := auxToSym(v_1_0.Aux)
+			y := auxToSym(v_1_0.Aux)
 			v.reset(OpConstBool)
-			v.AuxInt = boolToAuxInt(a != b || o1 != o2)
+			v.AuxInt = boolToAuxInt(x != y || o1 != o2)
 			return true
 		}
 		break
@@ -16018,7 +18089,6 @@ func rewriteValuegeneric_OpNilCheck(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
-	config := b.Func.Config
 	fe := b.Func.fe
 	// match: (NilCheck (GetG mem) mem)
 	// result: mem
@@ -16033,61 +18103,33 @@ func rewriteValuegeneric_OpNilCheck(v *Value) bool {
 		v.copyOf(mem)
 		return true
 	}
-	// match: (NilCheck (Load (OffPtr [c] (SP)) (StaticCall {sym} _)) _)
-	// cond: symNamed(sym, "runtime.newobject") && c == config.ctxt.FixedFrameSize() + config.RegSize && warnRule(fe.Debug_checknil(), v, "removed nil check")
+	// match: (NilCheck (SelectN [0] call:(StaticLECall _ _)) _)
+	// cond: isSameCall(call.Aux, "runtime.newobject") && warnRule(fe.Debug_checknil(), v, "removed nil check")
 	// result: (Invalid)
 	for {
-		if v_0.Op != OpLoad {
+		if v_0.Op != OpSelectN || auxIntToInt64(v_0.AuxInt) != 0 {
 			break
 		}
-		_ = v_0.Args[1]
-		v_0_0 := v_0.Args[0]
-		if v_0_0.Op != OpOffPtr {
-			break
-		}
-		c := auxIntToInt64(v_0_0.AuxInt)
-		v_0_0_0 := v_0_0.Args[0]
-		if v_0_0_0.Op != OpSP {
-			break
-		}
-		v_0_1 := v_0.Args[1]
-		if v_0_1.Op != OpStaticCall {
-			break
-		}
-		sym := auxToSym(v_0_1.Aux)
-		if !(symNamed(sym, "runtime.newobject") && c == config.ctxt.FixedFrameSize()+config.RegSize && warnRule(fe.Debug_checknil(), v, "removed nil check")) {
+		call := v_0.Args[0]
+		if call.Op != OpStaticLECall || len(call.Args) != 2 || !(isSameCall(call.Aux, "runtime.newobject") && warnRule(fe.Debug_checknil(), v, "removed nil check")) {
 			break
 		}
 		v.reset(OpInvalid)
 		return true
 	}
-	// match: (NilCheck (OffPtr (Load (OffPtr [c] (SP)) (StaticCall {sym} _))) _)
-	// cond: symNamed(sym, "runtime.newobject") && c == config.ctxt.FixedFrameSize() + config.RegSize && warnRule(fe.Debug_checknil(), v, "removed nil check")
+	// match: (NilCheck (OffPtr (SelectN [0] call:(StaticLECall _ _))) _)
+	// cond: isSameCall(call.Aux, "runtime.newobject") && warnRule(fe.Debug_checknil(), v, "removed nil check")
 	// result: (Invalid)
 	for {
 		if v_0.Op != OpOffPtr {
 			break
 		}
 		v_0_0 := v_0.Args[0]
-		if v_0_0.Op != OpLoad {
+		if v_0_0.Op != OpSelectN || auxIntToInt64(v_0_0.AuxInt) != 0 {
 			break
 		}
-		_ = v_0_0.Args[1]
-		v_0_0_0 := v_0_0.Args[0]
-		if v_0_0_0.Op != OpOffPtr {
-			break
-		}
-		c := auxIntToInt64(v_0_0_0.AuxInt)
-		v_0_0_0_0 := v_0_0_0.Args[0]
-		if v_0_0_0_0.Op != OpSP {
-			break
-		}
-		v_0_0_1 := v_0_0.Args[1]
-		if v_0_0_1.Op != OpStaticCall {
-			break
-		}
-		sym := auxToSym(v_0_0_1.Aux)
-		if !(symNamed(sym, "runtime.newobject") && c == config.ctxt.FixedFrameSize()+config.RegSize && warnRule(fe.Debug_checknil(), v, "removed nil check")) {
+		call := v_0_0.Args[0]
+		if call.Op != OpStaticLECall || len(call.Args) != 2 || !(isSameCall(call.Aux, "runtime.newobject") && warnRule(fe.Debug_checknil(), v, "removed nil check")) {
 			break
 		}
 		v.reset(OpInvalid)
@@ -16496,17 +18538,17 @@ func rewriteValuegeneric_OpNot(v *Value) bool {
 }
 func rewriteValuegeneric_OpOffPtr(v *Value) bool {
 	v_0 := v.Args[0]
-	// match: (OffPtr (OffPtr p [b]) [a])
-	// result: (OffPtr p [a+b])
+	// match: (OffPtr (OffPtr p [y]) [x])
+	// result: (OffPtr p [x+y])
 	for {
-		a := auxIntToInt64(v.AuxInt)
+		x := auxIntToInt64(v.AuxInt)
 		if v_0.Op != OpOffPtr {
 			break
 		}
-		b := auxIntToInt64(v_0.AuxInt)
+		y := auxIntToInt64(v_0.AuxInt)
 		p := v_0.Args[0]
 		v.reset(OpOffPtr)
-		v.AuxInt = int64ToAuxInt(a + b)
+		v.AuxInt = int64ToAuxInt(x + y)
 		v.AddArg(p)
 		return true
 	}
@@ -16530,6 +18572,7 @@ func rewriteValuegeneric_OpOr16(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (Or16 (Const16 [c]) (Const16 [d]))
 	// result: (Const16 [c|d])
 	for {
@@ -16576,6 +18619,23 @@ func rewriteValuegeneric_OpOr16(v *Value) bool {
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpConst16 || auxIntToInt16(v_0.AuxInt) != -1 {
+				continue
+			}
+			v.reset(OpConst16)
+			v.AuxInt = int16ToAuxInt(-1)
+			return true
+		}
+		break
+	}
+	// match: (Or16 (Com16 x) x)
+	// result: (Const16 [-1])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom16 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
 				continue
 			}
 			v.reset(OpConst16)
@@ -16702,12 +18762,321 @@ func rewriteValuegeneric_OpOr16(v *Value) bool {
 		}
 		break
 	}
+	// match: (Or16 (Lsh16x64 x z:(Const64 <t> [c])) (Rsh16Ux64 x (Const64 [d])))
+	// cond: c < 16 && d == 16-c && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpLsh16x64 {
+				continue
+			}
+			_ = v_0.Args[1]
+			x := v_0.Args[0]
+			z := v_0.Args[1]
+			if z.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(z.AuxInt)
+			if v_1.Op != OpRsh16Ux64 {
+				continue
+			}
+			_ = v_1.Args[1]
+			if x != v_1.Args[0] {
+				continue
+			}
+			v_1_1 := v_1.Args[1]
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			d := auxIntToInt64(v_1_1.AuxInt)
+			if !(c < 16 && d == 16-c && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or16 left:(Lsh16x64 x y) right:(Rsh16Ux64 x (Sub64 (Const64 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh16x64 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh16Ux64 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub64 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst64 || auxIntToInt64(right_1_0.AuxInt) != 16 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or16 left:(Lsh16x32 x y) right:(Rsh16Ux32 x (Sub32 (Const32 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh16x32 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh16Ux32 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub32 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst32 || auxIntToInt32(right_1_0.AuxInt) != 16 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or16 left:(Lsh16x16 x y) right:(Rsh16Ux16 x (Sub16 (Const16 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh16x16 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh16Ux16 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub16 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst16 || auxIntToInt16(right_1_0.AuxInt) != 16 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or16 left:(Lsh16x8 x y) right:(Rsh16Ux8 x (Sub8 (Const8 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh16x8 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh16Ux8 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub8 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst8 || auxIntToInt8(right_1_0.AuxInt) != 16 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or16 right:(Rsh16Ux64 x y) left:(Lsh16x64 x z:(Sub64 (Const64 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh16Ux64 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh16x64 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub64 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst64 || auxIntToInt64(z_0.AuxInt) != 16 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or16 right:(Rsh16Ux32 x y) left:(Lsh16x32 x z:(Sub32 (Const32 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh16Ux32 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh16x32 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub32 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst32 || auxIntToInt32(z_0.AuxInt) != 16 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or16 right:(Rsh16Ux16 x y) left:(Lsh16x16 x z:(Sub16 (Const16 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh16Ux16 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh16x16 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub16 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst16 || auxIntToInt16(z_0.AuxInt) != 16 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or16 right:(Rsh16Ux8 x y) left:(Lsh16x8 x z:(Sub8 (Const8 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh16Ux8 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh16x8 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub8 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst8 || auxIntToInt8(z_0.AuxInt) != 16 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
 	return false
 }
 func rewriteValuegeneric_OpOr32(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (Or32 (Const32 [c]) (Const32 [d]))
 	// result: (Const32 [c|d])
 	for {
@@ -16754,6 +19123,23 @@ func rewriteValuegeneric_OpOr32(v *Value) bool {
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpConst32 || auxIntToInt32(v_0.AuxInt) != -1 {
+				continue
+			}
+			v.reset(OpConst32)
+			v.AuxInt = int32ToAuxInt(-1)
+			return true
+		}
+		break
+	}
+	// match: (Or32 (Com32 x) x)
+	// result: (Const32 [-1])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom32 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
 				continue
 			}
 			v.reset(OpConst32)
@@ -16880,12 +19266,321 @@ func rewriteValuegeneric_OpOr32(v *Value) bool {
 		}
 		break
 	}
+	// match: (Or32 (Lsh32x64 x z:(Const64 <t> [c])) (Rsh32Ux64 x (Const64 [d])))
+	// cond: c < 32 && d == 32-c && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpLsh32x64 {
+				continue
+			}
+			_ = v_0.Args[1]
+			x := v_0.Args[0]
+			z := v_0.Args[1]
+			if z.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(z.AuxInt)
+			if v_1.Op != OpRsh32Ux64 {
+				continue
+			}
+			_ = v_1.Args[1]
+			if x != v_1.Args[0] {
+				continue
+			}
+			v_1_1 := v_1.Args[1]
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			d := auxIntToInt64(v_1_1.AuxInt)
+			if !(c < 32 && d == 32-c && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or32 left:(Lsh32x64 x y) right:(Rsh32Ux64 x (Sub64 (Const64 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh32x64 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh32Ux64 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub64 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst64 || auxIntToInt64(right_1_0.AuxInt) != 32 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or32 left:(Lsh32x32 x y) right:(Rsh32Ux32 x (Sub32 (Const32 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh32x32 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh32Ux32 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub32 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst32 || auxIntToInt32(right_1_0.AuxInt) != 32 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or32 left:(Lsh32x16 x y) right:(Rsh32Ux16 x (Sub16 (Const16 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh32x16 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh32Ux16 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub16 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst16 || auxIntToInt16(right_1_0.AuxInt) != 32 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or32 left:(Lsh32x8 x y) right:(Rsh32Ux8 x (Sub8 (Const8 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh32x8 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh32Ux8 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub8 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst8 || auxIntToInt8(right_1_0.AuxInt) != 32 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or32 right:(Rsh32Ux64 x y) left:(Lsh32x64 x z:(Sub64 (Const64 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh32Ux64 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh32x64 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub64 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst64 || auxIntToInt64(z_0.AuxInt) != 32 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or32 right:(Rsh32Ux32 x y) left:(Lsh32x32 x z:(Sub32 (Const32 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh32Ux32 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh32x32 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub32 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst32 || auxIntToInt32(z_0.AuxInt) != 32 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or32 right:(Rsh32Ux16 x y) left:(Lsh32x16 x z:(Sub16 (Const16 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh32Ux16 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh32x16 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub16 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst16 || auxIntToInt16(z_0.AuxInt) != 32 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or32 right:(Rsh32Ux8 x y) left:(Lsh32x8 x z:(Sub8 (Const8 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh32Ux8 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh32x8 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub8 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst8 || auxIntToInt8(z_0.AuxInt) != 32 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
 	return false
 }
 func rewriteValuegeneric_OpOr64(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (Or64 (Const64 [c]) (Const64 [d]))
 	// result: (Const64 [c|d])
 	for {
@@ -16932,6 +19627,23 @@ func rewriteValuegeneric_OpOr64(v *Value) bool {
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpConst64 || auxIntToInt64(v_0.AuxInt) != -1 {
+				continue
+			}
+			v.reset(OpConst64)
+			v.AuxInt = int64ToAuxInt(-1)
+			return true
+		}
+		break
+	}
+	// match: (Or64 (Com64 x) x)
+	// result: (Const64 [-1])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom64 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
 				continue
 			}
 			v.reset(OpConst64)
@@ -17058,12 +19770,321 @@ func rewriteValuegeneric_OpOr64(v *Value) bool {
 		}
 		break
 	}
+	// match: (Or64 (Lsh64x64 x z:(Const64 <t> [c])) (Rsh64Ux64 x (Const64 [d])))
+	// cond: c < 64 && d == 64-c && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpLsh64x64 {
+				continue
+			}
+			_ = v_0.Args[1]
+			x := v_0.Args[0]
+			z := v_0.Args[1]
+			if z.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(z.AuxInt)
+			if v_1.Op != OpRsh64Ux64 {
+				continue
+			}
+			_ = v_1.Args[1]
+			if x != v_1.Args[0] {
+				continue
+			}
+			v_1_1 := v_1.Args[1]
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			d := auxIntToInt64(v_1_1.AuxInt)
+			if !(c < 64 && d == 64-c && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or64 left:(Lsh64x64 x y) right:(Rsh64Ux64 x (Sub64 (Const64 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh64x64 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh64Ux64 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub64 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst64 || auxIntToInt64(right_1_0.AuxInt) != 64 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or64 left:(Lsh64x32 x y) right:(Rsh64Ux32 x (Sub32 (Const32 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh64x32 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh64Ux32 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub32 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst32 || auxIntToInt32(right_1_0.AuxInt) != 64 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or64 left:(Lsh64x16 x y) right:(Rsh64Ux16 x (Sub16 (Const16 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh64x16 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh64Ux16 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub16 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst16 || auxIntToInt16(right_1_0.AuxInt) != 64 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or64 left:(Lsh64x8 x y) right:(Rsh64Ux8 x (Sub8 (Const8 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh64x8 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh64Ux8 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub8 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst8 || auxIntToInt8(right_1_0.AuxInt) != 64 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or64 right:(Rsh64Ux64 x y) left:(Lsh64x64 x z:(Sub64 (Const64 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh64Ux64 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh64x64 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub64 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst64 || auxIntToInt64(z_0.AuxInt) != 64 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or64 right:(Rsh64Ux32 x y) left:(Lsh64x32 x z:(Sub32 (Const32 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh64Ux32 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh64x32 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub32 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst32 || auxIntToInt32(z_0.AuxInt) != 64 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or64 right:(Rsh64Ux16 x y) left:(Lsh64x16 x z:(Sub16 (Const16 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh64Ux16 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh64x16 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub16 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst16 || auxIntToInt16(z_0.AuxInt) != 64 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or64 right:(Rsh64Ux8 x y) left:(Lsh64x8 x z:(Sub8 (Const8 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh64Ux8 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh64x8 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub8 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst8 || auxIntToInt8(z_0.AuxInt) != 64 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
 	return false
 }
 func rewriteValuegeneric_OpOr8(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (Or8 (Const8 [c]) (Const8 [d]))
 	// result: (Const8 [c|d])
 	for {
@@ -17110,6 +20131,23 @@ func rewriteValuegeneric_OpOr8(v *Value) bool {
 	for {
 		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
 			if v_0.Op != OpConst8 || auxIntToInt8(v_0.AuxInt) != -1 {
+				continue
+			}
+			v.reset(OpConst8)
+			v.AuxInt = int8ToAuxInt(-1)
+			return true
+		}
+		break
+	}
+	// match: (Or8 (Com8 x) x)
+	// result: (Const8 [-1])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom8 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
 				continue
 			}
 			v.reset(OpConst8)
@@ -17233,6 +20271,314 @@ func rewriteValuegeneric_OpOr8(v *Value) bool {
 				v.AddArg2(v0, x)
 				return true
 			}
+		}
+		break
+	}
+	// match: (Or8 (Lsh8x64 x z:(Const64 <t> [c])) (Rsh8Ux64 x (Const64 [d])))
+	// cond: c < 8 && d == 8-c && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpLsh8x64 {
+				continue
+			}
+			_ = v_0.Args[1]
+			x := v_0.Args[0]
+			z := v_0.Args[1]
+			if z.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(z.AuxInt)
+			if v_1.Op != OpRsh8Ux64 {
+				continue
+			}
+			_ = v_1.Args[1]
+			if x != v_1.Args[0] {
+				continue
+			}
+			v_1_1 := v_1.Args[1]
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			d := auxIntToInt64(v_1_1.AuxInt)
+			if !(c < 8 && d == 8-c && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or8 left:(Lsh8x64 x y) right:(Rsh8Ux64 x (Sub64 (Const64 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh8x64 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh8Ux64 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub64 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst64 || auxIntToInt64(right_1_0.AuxInt) != 8 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or8 left:(Lsh8x32 x y) right:(Rsh8Ux32 x (Sub32 (Const32 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh8x32 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh8Ux32 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub32 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst32 || auxIntToInt32(right_1_0.AuxInt) != 8 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or8 left:(Lsh8x16 x y) right:(Rsh8Ux16 x (Sub16 (Const16 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh8x16 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh8Ux16 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub16 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst16 || auxIntToInt16(right_1_0.AuxInt) != 8 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or8 left:(Lsh8x8 x y) right:(Rsh8Ux8 x (Sub8 (Const8 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh8x8 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh8Ux8 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub8 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst8 || auxIntToInt8(right_1_0.AuxInt) != 8 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Or8 right:(Rsh8Ux64 x y) left:(Lsh8x64 x z:(Sub64 (Const64 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh8Ux64 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh8x64 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub64 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst64 || auxIntToInt64(z_0.AuxInt) != 8 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or8 right:(Rsh8Ux32 x y) left:(Lsh8x32 x z:(Sub32 (Const32 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh8Ux32 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh8x32 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub32 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst32 || auxIntToInt32(z_0.AuxInt) != 8 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or8 right:(Rsh8Ux16 x y) left:(Lsh8x16 x z:(Sub16 (Const16 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh8Ux16 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh8x16 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub16 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst16 || auxIntToInt16(z_0.AuxInt) != 8 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Or8 right:(Rsh8Ux8 x y) left:(Lsh8x8 x z:(Sub8 (Const8 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh8Ux8 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh8x8 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub8 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst8 || auxIntToInt8(z_0.AuxInt) != 8 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
 		}
 		break
 	}
@@ -18557,9 +21903,13 @@ func rewriteValuegeneric_OpOrB(v *Value) bool {
 	return false
 }
 func rewriteValuegeneric_OpPhi(v *Value) bool {
+	b := v.Block
 	// match: (Phi (Const8 [c]) (Const8 [c]))
 	// result: (Const8 [c])
 	for {
+		if len(v.Args) != 2 {
+			break
+		}
 		_ = v.Args[1]
 		v_0 := v.Args[0]
 		if v_0.Op != OpConst8 {
@@ -18567,7 +21917,7 @@ func rewriteValuegeneric_OpPhi(v *Value) bool {
 		}
 		c := auxIntToInt8(v_0.AuxInt)
 		v_1 := v.Args[1]
-		if v_1.Op != OpConst8 || auxIntToInt8(v_1.AuxInt) != c || len(v.Args) != 2 {
+		if v_1.Op != OpConst8 || auxIntToInt8(v_1.AuxInt) != c {
 			break
 		}
 		v.reset(OpConst8)
@@ -18577,6 +21927,9 @@ func rewriteValuegeneric_OpPhi(v *Value) bool {
 	// match: (Phi (Const16 [c]) (Const16 [c]))
 	// result: (Const16 [c])
 	for {
+		if len(v.Args) != 2 {
+			break
+		}
 		_ = v.Args[1]
 		v_0 := v.Args[0]
 		if v_0.Op != OpConst16 {
@@ -18584,7 +21937,7 @@ func rewriteValuegeneric_OpPhi(v *Value) bool {
 		}
 		c := auxIntToInt16(v_0.AuxInt)
 		v_1 := v.Args[1]
-		if v_1.Op != OpConst16 || auxIntToInt16(v_1.AuxInt) != c || len(v.Args) != 2 {
+		if v_1.Op != OpConst16 || auxIntToInt16(v_1.AuxInt) != c {
 			break
 		}
 		v.reset(OpConst16)
@@ -18594,6 +21947,9 @@ func rewriteValuegeneric_OpPhi(v *Value) bool {
 	// match: (Phi (Const32 [c]) (Const32 [c]))
 	// result: (Const32 [c])
 	for {
+		if len(v.Args) != 2 {
+			break
+		}
 		_ = v.Args[1]
 		v_0 := v.Args[0]
 		if v_0.Op != OpConst32 {
@@ -18601,7 +21957,7 @@ func rewriteValuegeneric_OpPhi(v *Value) bool {
 		}
 		c := auxIntToInt32(v_0.AuxInt)
 		v_1 := v.Args[1]
-		if v_1.Op != OpConst32 || auxIntToInt32(v_1.AuxInt) != c || len(v.Args) != 2 {
+		if v_1.Op != OpConst32 || auxIntToInt32(v_1.AuxInt) != c {
 			break
 		}
 		v.reset(OpConst32)
@@ -18611,6 +21967,9 @@ func rewriteValuegeneric_OpPhi(v *Value) bool {
 	// match: (Phi (Const64 [c]) (Const64 [c]))
 	// result: (Const64 [c])
 	for {
+		if len(v.Args) != 2 {
+			break
+		}
 		_ = v.Args[1]
 		v_0 := v.Args[0]
 		if v_0.Op != OpConst64 {
@@ -18618,11 +21977,39 @@ func rewriteValuegeneric_OpPhi(v *Value) bool {
 		}
 		c := auxIntToInt64(v_0.AuxInt)
 		v_1 := v.Args[1]
-		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || len(v.Args) != 2 {
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c {
 			break
 		}
 		v.reset(OpConst64)
 		v.AuxInt = int64ToAuxInt(c)
+		return true
+	}
+	// match: (Phi <t> nx:(Not x) ny:(Not y))
+	// cond: nx.Uses == 1 && ny.Uses == 1
+	// result: (Not (Phi <t> x y))
+	for {
+		if len(v.Args) != 2 {
+			break
+		}
+		t := v.Type
+		_ = v.Args[1]
+		nx := v.Args[0]
+		if nx.Op != OpNot {
+			break
+		}
+		x := nx.Args[0]
+		ny := v.Args[1]
+		if ny.Op != OpNot {
+			break
+		}
+		y := ny.Args[0]
+		if !(nx.Uses == 1 && ny.Uses == 1) {
+			break
+		}
+		v.reset(OpNot)
+		v0 := b.NewValue0(v.Pos, OpPhi, t)
+		v0.AddArg2(x, y)
+		v.AddArg(v0)
 		return true
 	}
 	return false
@@ -18674,6 +22061,8 @@ func rewriteValuegeneric_OpPtrIndex(v *Value) bool {
 func rewriteValuegeneric_OpRotateLeft16(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
+	b := v.Block
+	config := b.Func.Config
 	// match: (RotateLeft16 x (Const16 [c]))
 	// cond: c%16 == 0
 	// result: x
@@ -18689,11 +22078,536 @@ func rewriteValuegeneric_OpRotateLeft16(v *Value) bool {
 		v.copyOf(x)
 		return true
 	}
+	// match: (RotateLeft16 x (And64 y (Const64 [c])))
+	// cond: c&15 == 15
+	// result: (RotateLeft16 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd64 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(v_1_1.AuxInt)
+			if !(c&15 == 15) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft16 x (And32 y (Const32 [c])))
+	// cond: c&15 == 15
+	// result: (RotateLeft16 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd32 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst32 {
+				continue
+			}
+			c := auxIntToInt32(v_1_1.AuxInt)
+			if !(c&15 == 15) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft16 x (And16 y (Const16 [c])))
+	// cond: c&15 == 15
+	// result: (RotateLeft16 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd16 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst16 {
+				continue
+			}
+			c := auxIntToInt16(v_1_1.AuxInt)
+			if !(c&15 == 15) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft16 x (And8 y (Const8 [c])))
+	// cond: c&15 == 15
+	// result: (RotateLeft16 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd8 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst8 {
+				continue
+			}
+			c := auxIntToInt8(v_1_1.AuxInt)
+			if !(c&15 == 15) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft16 x (Neg64 (And64 y (Const64 [c]))))
+	// cond: c&15 == 15
+	// result: (RotateLeft16 x (Neg64 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg64 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd64 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(v_1_0_1.AuxInt)
+			if !(c&15 == 15) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v0 := b.NewValue0(v.Pos, OpNeg64, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft16 x (Neg32 (And32 y (Const32 [c]))))
+	// cond: c&15 == 15
+	// result: (RotateLeft16 x (Neg32 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg32 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd32 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst32 {
+				continue
+			}
+			c := auxIntToInt32(v_1_0_1.AuxInt)
+			if !(c&15 == 15) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v0 := b.NewValue0(v.Pos, OpNeg32, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft16 x (Neg16 (And16 y (Const16 [c]))))
+	// cond: c&15 == 15
+	// result: (RotateLeft16 x (Neg16 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg16 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd16 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst16 {
+				continue
+			}
+			c := auxIntToInt16(v_1_0_1.AuxInt)
+			if !(c&15 == 15) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v0 := b.NewValue0(v.Pos, OpNeg16, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft16 x (Neg8 (And8 y (Const8 [c]))))
+	// cond: c&15 == 15
+	// result: (RotateLeft16 x (Neg8 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg8 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd8 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst8 {
+				continue
+			}
+			c := auxIntToInt8(v_1_0_1.AuxInt)
+			if !(c&15 == 15) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v0 := b.NewValue0(v.Pos, OpNeg8, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft16 x (Add64 y (Const64 [c])))
+	// cond: c&15 == 0
+	// result: (RotateLeft16 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd64 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(v_1_1.AuxInt)
+			if !(c&15 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft16 x (Add32 y (Const32 [c])))
+	// cond: c&15 == 0
+	// result: (RotateLeft16 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd32 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst32 {
+				continue
+			}
+			c := auxIntToInt32(v_1_1.AuxInt)
+			if !(c&15 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft16 x (Add16 y (Const16 [c])))
+	// cond: c&15 == 0
+	// result: (RotateLeft16 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd16 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst16 {
+				continue
+			}
+			c := auxIntToInt16(v_1_1.AuxInt)
+			if !(c&15 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft16 x (Add8 y (Const8 [c])))
+	// cond: c&15 == 0
+	// result: (RotateLeft16 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd8 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst8 {
+				continue
+			}
+			c := auxIntToInt8(v_1_1.AuxInt)
+			if !(c&15 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft16 x (Sub64 (Const64 [c]) y))
+	// cond: c&15 == 0
+	// result: (RotateLeft16 x (Neg64 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub64 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(v_1_0.AuxInt)
+		if !(c&15 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft16)
+		v0 := b.NewValue0(v.Pos, OpNeg64, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft16 x (Sub32 (Const32 [c]) y))
+	// cond: c&15 == 0
+	// result: (RotateLeft16 x (Neg32 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub32 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst32 {
+			break
+		}
+		c := auxIntToInt32(v_1_0.AuxInt)
+		if !(c&15 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft16)
+		v0 := b.NewValue0(v.Pos, OpNeg32, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft16 x (Sub16 (Const16 [c]) y))
+	// cond: c&15 == 0
+	// result: (RotateLeft16 x (Neg16 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub16 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst16 {
+			break
+		}
+		c := auxIntToInt16(v_1_0.AuxInt)
+		if !(c&15 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft16)
+		v0 := b.NewValue0(v.Pos, OpNeg16, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft16 x (Sub8 (Const8 [c]) y))
+	// cond: c&15 == 0
+	// result: (RotateLeft16 x (Neg8 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub8 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst8 {
+			break
+		}
+		c := auxIntToInt8(v_1_0.AuxInt)
+		if !(c&15 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft16)
+		v0 := b.NewValue0(v.Pos, OpNeg8, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft16 x (Const64 <t> [c]))
+	// cond: config.PtrSize == 4
+	// result: (RotateLeft16 x (Const32 <t> [int32(c)]))
+	for {
+		x := v_0
+		if v_1.Op != OpConst64 {
+			break
+		}
+		t := v_1.Type
+		c := auxIntToInt64(v_1.AuxInt)
+		if !(config.PtrSize == 4) {
+			break
+		}
+		v.reset(OpRotateLeft16)
+		v0 := b.NewValue0(v.Pos, OpConst32, t)
+		v0.AuxInt = int32ToAuxInt(int32(c))
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft16 (RotateLeft16 x c) d)
+	// cond: c.Type.Size() == 8 && d.Type.Size() == 8
+	// result: (RotateLeft16 x (Add64 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft16 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 8 && d.Type.Size() == 8) {
+			break
+		}
+		v.reset(OpRotateLeft16)
+		v0 := b.NewValue0(v.Pos, OpAdd64, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft16 (RotateLeft16 x c) d)
+	// cond: c.Type.Size() == 4 && d.Type.Size() == 4
+	// result: (RotateLeft16 x (Add32 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft16 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 4 && d.Type.Size() == 4) {
+			break
+		}
+		v.reset(OpRotateLeft16)
+		v0 := b.NewValue0(v.Pos, OpAdd32, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft16 (RotateLeft16 x c) d)
+	// cond: c.Type.Size() == 2 && d.Type.Size() == 2
+	// result: (RotateLeft16 x (Add16 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft16 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 2 && d.Type.Size() == 2) {
+			break
+		}
+		v.reset(OpRotateLeft16)
+		v0 := b.NewValue0(v.Pos, OpAdd16, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft16 (RotateLeft16 x c) d)
+	// cond: c.Type.Size() == 1 && d.Type.Size() == 1
+	// result: (RotateLeft16 x (Add8 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft16 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 1 && d.Type.Size() == 1) {
+			break
+		}
+		v.reset(OpRotateLeft16)
+		v0 := b.NewValue0(v.Pos, OpAdd8, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
 	return false
 }
 func rewriteValuegeneric_OpRotateLeft32(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
+	b := v.Block
+	config := b.Func.Config
 	// match: (RotateLeft32 x (Const32 [c]))
 	// cond: c%32 == 0
 	// result: x
@@ -18709,11 +22623,536 @@ func rewriteValuegeneric_OpRotateLeft32(v *Value) bool {
 		v.copyOf(x)
 		return true
 	}
+	// match: (RotateLeft32 x (And64 y (Const64 [c])))
+	// cond: c&31 == 31
+	// result: (RotateLeft32 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd64 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(v_1_1.AuxInt)
+			if !(c&31 == 31) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft32 x (And32 y (Const32 [c])))
+	// cond: c&31 == 31
+	// result: (RotateLeft32 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd32 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst32 {
+				continue
+			}
+			c := auxIntToInt32(v_1_1.AuxInt)
+			if !(c&31 == 31) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft32 x (And16 y (Const16 [c])))
+	// cond: c&31 == 31
+	// result: (RotateLeft32 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd16 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst16 {
+				continue
+			}
+			c := auxIntToInt16(v_1_1.AuxInt)
+			if !(c&31 == 31) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft32 x (And8 y (Const8 [c])))
+	// cond: c&31 == 31
+	// result: (RotateLeft32 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd8 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst8 {
+				continue
+			}
+			c := auxIntToInt8(v_1_1.AuxInt)
+			if !(c&31 == 31) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft32 x (Neg64 (And64 y (Const64 [c]))))
+	// cond: c&31 == 31
+	// result: (RotateLeft32 x (Neg64 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg64 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd64 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(v_1_0_1.AuxInt)
+			if !(c&31 == 31) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v0 := b.NewValue0(v.Pos, OpNeg64, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft32 x (Neg32 (And32 y (Const32 [c]))))
+	// cond: c&31 == 31
+	// result: (RotateLeft32 x (Neg32 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg32 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd32 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst32 {
+				continue
+			}
+			c := auxIntToInt32(v_1_0_1.AuxInt)
+			if !(c&31 == 31) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v0 := b.NewValue0(v.Pos, OpNeg32, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft32 x (Neg16 (And16 y (Const16 [c]))))
+	// cond: c&31 == 31
+	// result: (RotateLeft32 x (Neg16 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg16 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd16 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst16 {
+				continue
+			}
+			c := auxIntToInt16(v_1_0_1.AuxInt)
+			if !(c&31 == 31) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v0 := b.NewValue0(v.Pos, OpNeg16, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft32 x (Neg8 (And8 y (Const8 [c]))))
+	// cond: c&31 == 31
+	// result: (RotateLeft32 x (Neg8 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg8 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd8 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst8 {
+				continue
+			}
+			c := auxIntToInt8(v_1_0_1.AuxInt)
+			if !(c&31 == 31) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v0 := b.NewValue0(v.Pos, OpNeg8, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft32 x (Add64 y (Const64 [c])))
+	// cond: c&31 == 0
+	// result: (RotateLeft32 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd64 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(v_1_1.AuxInt)
+			if !(c&31 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft32 x (Add32 y (Const32 [c])))
+	// cond: c&31 == 0
+	// result: (RotateLeft32 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd32 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst32 {
+				continue
+			}
+			c := auxIntToInt32(v_1_1.AuxInt)
+			if !(c&31 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft32 x (Add16 y (Const16 [c])))
+	// cond: c&31 == 0
+	// result: (RotateLeft32 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd16 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst16 {
+				continue
+			}
+			c := auxIntToInt16(v_1_1.AuxInt)
+			if !(c&31 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft32 x (Add8 y (Const8 [c])))
+	// cond: c&31 == 0
+	// result: (RotateLeft32 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd8 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst8 {
+				continue
+			}
+			c := auxIntToInt8(v_1_1.AuxInt)
+			if !(c&31 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft32 x (Sub64 (Const64 [c]) y))
+	// cond: c&31 == 0
+	// result: (RotateLeft32 x (Neg64 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub64 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(v_1_0.AuxInt)
+		if !(c&31 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft32)
+		v0 := b.NewValue0(v.Pos, OpNeg64, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft32 x (Sub32 (Const32 [c]) y))
+	// cond: c&31 == 0
+	// result: (RotateLeft32 x (Neg32 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub32 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst32 {
+			break
+		}
+		c := auxIntToInt32(v_1_0.AuxInt)
+		if !(c&31 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft32)
+		v0 := b.NewValue0(v.Pos, OpNeg32, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft32 x (Sub16 (Const16 [c]) y))
+	// cond: c&31 == 0
+	// result: (RotateLeft32 x (Neg16 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub16 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst16 {
+			break
+		}
+		c := auxIntToInt16(v_1_0.AuxInt)
+		if !(c&31 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft32)
+		v0 := b.NewValue0(v.Pos, OpNeg16, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft32 x (Sub8 (Const8 [c]) y))
+	// cond: c&31 == 0
+	// result: (RotateLeft32 x (Neg8 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub8 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst8 {
+			break
+		}
+		c := auxIntToInt8(v_1_0.AuxInt)
+		if !(c&31 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft32)
+		v0 := b.NewValue0(v.Pos, OpNeg8, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft32 x (Const64 <t> [c]))
+	// cond: config.PtrSize == 4
+	// result: (RotateLeft32 x (Const32 <t> [int32(c)]))
+	for {
+		x := v_0
+		if v_1.Op != OpConst64 {
+			break
+		}
+		t := v_1.Type
+		c := auxIntToInt64(v_1.AuxInt)
+		if !(config.PtrSize == 4) {
+			break
+		}
+		v.reset(OpRotateLeft32)
+		v0 := b.NewValue0(v.Pos, OpConst32, t)
+		v0.AuxInt = int32ToAuxInt(int32(c))
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft32 (RotateLeft32 x c) d)
+	// cond: c.Type.Size() == 8 && d.Type.Size() == 8
+	// result: (RotateLeft32 x (Add64 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft32 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 8 && d.Type.Size() == 8) {
+			break
+		}
+		v.reset(OpRotateLeft32)
+		v0 := b.NewValue0(v.Pos, OpAdd64, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft32 (RotateLeft32 x c) d)
+	// cond: c.Type.Size() == 4 && d.Type.Size() == 4
+	// result: (RotateLeft32 x (Add32 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft32 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 4 && d.Type.Size() == 4) {
+			break
+		}
+		v.reset(OpRotateLeft32)
+		v0 := b.NewValue0(v.Pos, OpAdd32, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft32 (RotateLeft32 x c) d)
+	// cond: c.Type.Size() == 2 && d.Type.Size() == 2
+	// result: (RotateLeft32 x (Add16 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft32 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 2 && d.Type.Size() == 2) {
+			break
+		}
+		v.reset(OpRotateLeft32)
+		v0 := b.NewValue0(v.Pos, OpAdd16, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft32 (RotateLeft32 x c) d)
+	// cond: c.Type.Size() == 1 && d.Type.Size() == 1
+	// result: (RotateLeft32 x (Add8 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft32 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 1 && d.Type.Size() == 1) {
+			break
+		}
+		v.reset(OpRotateLeft32)
+		v0 := b.NewValue0(v.Pos, OpAdd8, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
 	return false
 }
 func rewriteValuegeneric_OpRotateLeft64(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
+	b := v.Block
+	config := b.Func.Config
 	// match: (RotateLeft64 x (Const64 [c]))
 	// cond: c%64 == 0
 	// result: x
@@ -18729,11 +23168,536 @@ func rewriteValuegeneric_OpRotateLeft64(v *Value) bool {
 		v.copyOf(x)
 		return true
 	}
+	// match: (RotateLeft64 x (And64 y (Const64 [c])))
+	// cond: c&63 == 63
+	// result: (RotateLeft64 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd64 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(v_1_1.AuxInt)
+			if !(c&63 == 63) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft64 x (And32 y (Const32 [c])))
+	// cond: c&63 == 63
+	// result: (RotateLeft64 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd32 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst32 {
+				continue
+			}
+			c := auxIntToInt32(v_1_1.AuxInt)
+			if !(c&63 == 63) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft64 x (And16 y (Const16 [c])))
+	// cond: c&63 == 63
+	// result: (RotateLeft64 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd16 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst16 {
+				continue
+			}
+			c := auxIntToInt16(v_1_1.AuxInt)
+			if !(c&63 == 63) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft64 x (And8 y (Const8 [c])))
+	// cond: c&63 == 63
+	// result: (RotateLeft64 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd8 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst8 {
+				continue
+			}
+			c := auxIntToInt8(v_1_1.AuxInt)
+			if !(c&63 == 63) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft64 x (Neg64 (And64 y (Const64 [c]))))
+	// cond: c&63 == 63
+	// result: (RotateLeft64 x (Neg64 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg64 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd64 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(v_1_0_1.AuxInt)
+			if !(c&63 == 63) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v0 := b.NewValue0(v.Pos, OpNeg64, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft64 x (Neg32 (And32 y (Const32 [c]))))
+	// cond: c&63 == 63
+	// result: (RotateLeft64 x (Neg32 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg32 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd32 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst32 {
+				continue
+			}
+			c := auxIntToInt32(v_1_0_1.AuxInt)
+			if !(c&63 == 63) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v0 := b.NewValue0(v.Pos, OpNeg32, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft64 x (Neg16 (And16 y (Const16 [c]))))
+	// cond: c&63 == 63
+	// result: (RotateLeft64 x (Neg16 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg16 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd16 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst16 {
+				continue
+			}
+			c := auxIntToInt16(v_1_0_1.AuxInt)
+			if !(c&63 == 63) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v0 := b.NewValue0(v.Pos, OpNeg16, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft64 x (Neg8 (And8 y (Const8 [c]))))
+	// cond: c&63 == 63
+	// result: (RotateLeft64 x (Neg8 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg8 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd8 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst8 {
+				continue
+			}
+			c := auxIntToInt8(v_1_0_1.AuxInt)
+			if !(c&63 == 63) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v0 := b.NewValue0(v.Pos, OpNeg8, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft64 x (Add64 y (Const64 [c])))
+	// cond: c&63 == 0
+	// result: (RotateLeft64 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd64 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(v_1_1.AuxInt)
+			if !(c&63 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft64 x (Add32 y (Const32 [c])))
+	// cond: c&63 == 0
+	// result: (RotateLeft64 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd32 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst32 {
+				continue
+			}
+			c := auxIntToInt32(v_1_1.AuxInt)
+			if !(c&63 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft64 x (Add16 y (Const16 [c])))
+	// cond: c&63 == 0
+	// result: (RotateLeft64 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd16 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst16 {
+				continue
+			}
+			c := auxIntToInt16(v_1_1.AuxInt)
+			if !(c&63 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft64 x (Add8 y (Const8 [c])))
+	// cond: c&63 == 0
+	// result: (RotateLeft64 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd8 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst8 {
+				continue
+			}
+			c := auxIntToInt8(v_1_1.AuxInt)
+			if !(c&63 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft64 x (Sub64 (Const64 [c]) y))
+	// cond: c&63 == 0
+	// result: (RotateLeft64 x (Neg64 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub64 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(v_1_0.AuxInt)
+		if !(c&63 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft64)
+		v0 := b.NewValue0(v.Pos, OpNeg64, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft64 x (Sub32 (Const32 [c]) y))
+	// cond: c&63 == 0
+	// result: (RotateLeft64 x (Neg32 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub32 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst32 {
+			break
+		}
+		c := auxIntToInt32(v_1_0.AuxInt)
+		if !(c&63 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft64)
+		v0 := b.NewValue0(v.Pos, OpNeg32, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft64 x (Sub16 (Const16 [c]) y))
+	// cond: c&63 == 0
+	// result: (RotateLeft64 x (Neg16 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub16 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst16 {
+			break
+		}
+		c := auxIntToInt16(v_1_0.AuxInt)
+		if !(c&63 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft64)
+		v0 := b.NewValue0(v.Pos, OpNeg16, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft64 x (Sub8 (Const8 [c]) y))
+	// cond: c&63 == 0
+	// result: (RotateLeft64 x (Neg8 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub8 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst8 {
+			break
+		}
+		c := auxIntToInt8(v_1_0.AuxInt)
+		if !(c&63 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft64)
+		v0 := b.NewValue0(v.Pos, OpNeg8, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft64 x (Const64 <t> [c]))
+	// cond: config.PtrSize == 4
+	// result: (RotateLeft64 x (Const32 <t> [int32(c)]))
+	for {
+		x := v_0
+		if v_1.Op != OpConst64 {
+			break
+		}
+		t := v_1.Type
+		c := auxIntToInt64(v_1.AuxInt)
+		if !(config.PtrSize == 4) {
+			break
+		}
+		v.reset(OpRotateLeft64)
+		v0 := b.NewValue0(v.Pos, OpConst32, t)
+		v0.AuxInt = int32ToAuxInt(int32(c))
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft64 (RotateLeft64 x c) d)
+	// cond: c.Type.Size() == 8 && d.Type.Size() == 8
+	// result: (RotateLeft64 x (Add64 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft64 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 8 && d.Type.Size() == 8) {
+			break
+		}
+		v.reset(OpRotateLeft64)
+		v0 := b.NewValue0(v.Pos, OpAdd64, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft64 (RotateLeft64 x c) d)
+	// cond: c.Type.Size() == 4 && d.Type.Size() == 4
+	// result: (RotateLeft64 x (Add32 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft64 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 4 && d.Type.Size() == 4) {
+			break
+		}
+		v.reset(OpRotateLeft64)
+		v0 := b.NewValue0(v.Pos, OpAdd32, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft64 (RotateLeft64 x c) d)
+	// cond: c.Type.Size() == 2 && d.Type.Size() == 2
+	// result: (RotateLeft64 x (Add16 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft64 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 2 && d.Type.Size() == 2) {
+			break
+		}
+		v.reset(OpRotateLeft64)
+		v0 := b.NewValue0(v.Pos, OpAdd16, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft64 (RotateLeft64 x c) d)
+	// cond: c.Type.Size() == 1 && d.Type.Size() == 1
+	// result: (RotateLeft64 x (Add8 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft64 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 1 && d.Type.Size() == 1) {
+			break
+		}
+		v.reset(OpRotateLeft64)
+		v0 := b.NewValue0(v.Pos, OpAdd8, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
 	return false
 }
 func rewriteValuegeneric_OpRotateLeft8(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
+	b := v.Block
+	config := b.Func.Config
 	// match: (RotateLeft8 x (Const8 [c]))
 	// cond: c%8 == 0
 	// result: x
@@ -18747,6 +23711,529 @@ func rewriteValuegeneric_OpRotateLeft8(v *Value) bool {
 			break
 		}
 		v.copyOf(x)
+		return true
+	}
+	// match: (RotateLeft8 x (And64 y (Const64 [c])))
+	// cond: c&7 == 7
+	// result: (RotateLeft8 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd64 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(v_1_1.AuxInt)
+			if !(c&7 == 7) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft8 x (And32 y (Const32 [c])))
+	// cond: c&7 == 7
+	// result: (RotateLeft8 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd32 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst32 {
+				continue
+			}
+			c := auxIntToInt32(v_1_1.AuxInt)
+			if !(c&7 == 7) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft8 x (And16 y (Const16 [c])))
+	// cond: c&7 == 7
+	// result: (RotateLeft8 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd16 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst16 {
+				continue
+			}
+			c := auxIntToInt16(v_1_1.AuxInt)
+			if !(c&7 == 7) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft8 x (And8 y (Const8 [c])))
+	// cond: c&7 == 7
+	// result: (RotateLeft8 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAnd8 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst8 {
+				continue
+			}
+			c := auxIntToInt8(v_1_1.AuxInt)
+			if !(c&7 == 7) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft8 x (Neg64 (And64 y (Const64 [c]))))
+	// cond: c&7 == 7
+	// result: (RotateLeft8 x (Neg64 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg64 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd64 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(v_1_0_1.AuxInt)
+			if !(c&7 == 7) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v0 := b.NewValue0(v.Pos, OpNeg64, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft8 x (Neg32 (And32 y (Const32 [c]))))
+	// cond: c&7 == 7
+	// result: (RotateLeft8 x (Neg32 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg32 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd32 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst32 {
+				continue
+			}
+			c := auxIntToInt32(v_1_0_1.AuxInt)
+			if !(c&7 == 7) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v0 := b.NewValue0(v.Pos, OpNeg32, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft8 x (Neg16 (And16 y (Const16 [c]))))
+	// cond: c&7 == 7
+	// result: (RotateLeft8 x (Neg16 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg16 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd16 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst16 {
+				continue
+			}
+			c := auxIntToInt16(v_1_0_1.AuxInt)
+			if !(c&7 == 7) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v0 := b.NewValue0(v.Pos, OpNeg16, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft8 x (Neg8 (And8 y (Const8 [c]))))
+	// cond: c&7 == 7
+	// result: (RotateLeft8 x (Neg8 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpNeg8 {
+			break
+		}
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpAnd8 {
+			break
+		}
+		_ = v_1_0.Args[1]
+		v_1_0_0 := v_1_0.Args[0]
+		v_1_0_1 := v_1_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0_0, v_1_0_1 = _i0+1, v_1_0_1, v_1_0_0 {
+			y := v_1_0_0
+			if v_1_0_1.Op != OpConst8 {
+				continue
+			}
+			c := auxIntToInt8(v_1_0_1.AuxInt)
+			if !(c&7 == 7) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v0 := b.NewValue0(v.Pos, OpNeg8, y.Type)
+			v0.AddArg(y)
+			v.AddArg2(x, v0)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft8 x (Add64 y (Const64 [c])))
+	// cond: c&7 == 0
+	// result: (RotateLeft8 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd64 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(v_1_1.AuxInt)
+			if !(c&7 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft8 x (Add32 y (Const32 [c])))
+	// cond: c&7 == 0
+	// result: (RotateLeft8 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd32 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst32 {
+				continue
+			}
+			c := auxIntToInt32(v_1_1.AuxInt)
+			if !(c&7 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft8 x (Add16 y (Const16 [c])))
+	// cond: c&7 == 0
+	// result: (RotateLeft8 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd16 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst16 {
+				continue
+			}
+			c := auxIntToInt16(v_1_1.AuxInt)
+			if !(c&7 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft8 x (Add8 y (Const8 [c])))
+	// cond: c&7 == 0
+	// result: (RotateLeft8 x y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd8 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			y := v_1_0
+			if v_1_1.Op != OpConst8 {
+				continue
+			}
+			c := auxIntToInt8(v_1_1.AuxInt)
+			if !(c&7 == 0) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (RotateLeft8 x (Sub64 (Const64 [c]) y))
+	// cond: c&7 == 0
+	// result: (RotateLeft8 x (Neg64 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub64 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(v_1_0.AuxInt)
+		if !(c&7 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft8)
+		v0 := b.NewValue0(v.Pos, OpNeg64, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft8 x (Sub32 (Const32 [c]) y))
+	// cond: c&7 == 0
+	// result: (RotateLeft8 x (Neg32 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub32 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst32 {
+			break
+		}
+		c := auxIntToInt32(v_1_0.AuxInt)
+		if !(c&7 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft8)
+		v0 := b.NewValue0(v.Pos, OpNeg32, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft8 x (Sub16 (Const16 [c]) y))
+	// cond: c&7 == 0
+	// result: (RotateLeft8 x (Neg16 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub16 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst16 {
+			break
+		}
+		c := auxIntToInt16(v_1_0.AuxInt)
+		if !(c&7 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft8)
+		v0 := b.NewValue0(v.Pos, OpNeg16, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft8 x (Sub8 (Const8 [c]) y))
+	// cond: c&7 == 0
+	// result: (RotateLeft8 x (Neg8 <y.Type> y))
+	for {
+		x := v_0
+		if v_1.Op != OpSub8 {
+			break
+		}
+		y := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpConst8 {
+			break
+		}
+		c := auxIntToInt8(v_1_0.AuxInt)
+		if !(c&7 == 0) {
+			break
+		}
+		v.reset(OpRotateLeft8)
+		v0 := b.NewValue0(v.Pos, OpNeg8, y.Type)
+		v0.AddArg(y)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft8 x (Const64 <t> [c]))
+	// cond: config.PtrSize == 4
+	// result: (RotateLeft8 x (Const32 <t> [int32(c)]))
+	for {
+		x := v_0
+		if v_1.Op != OpConst64 {
+			break
+		}
+		t := v_1.Type
+		c := auxIntToInt64(v_1.AuxInt)
+		if !(config.PtrSize == 4) {
+			break
+		}
+		v.reset(OpRotateLeft8)
+		v0 := b.NewValue0(v.Pos, OpConst32, t)
+		v0.AuxInt = int32ToAuxInt(int32(c))
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft8 (RotateLeft8 x c) d)
+	// cond: c.Type.Size() == 8 && d.Type.Size() == 8
+	// result: (RotateLeft8 x (Add64 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft8 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 8 && d.Type.Size() == 8) {
+			break
+		}
+		v.reset(OpRotateLeft8)
+		v0 := b.NewValue0(v.Pos, OpAdd64, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft8 (RotateLeft8 x c) d)
+	// cond: c.Type.Size() == 4 && d.Type.Size() == 4
+	// result: (RotateLeft8 x (Add32 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft8 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 4 && d.Type.Size() == 4) {
+			break
+		}
+		v.reset(OpRotateLeft8)
+		v0 := b.NewValue0(v.Pos, OpAdd32, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft8 (RotateLeft8 x c) d)
+	// cond: c.Type.Size() == 2 && d.Type.Size() == 2
+	// result: (RotateLeft8 x (Add16 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft8 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 2 && d.Type.Size() == 2) {
+			break
+		}
+		v.reset(OpRotateLeft8)
+		v0 := b.NewValue0(v.Pos, OpAdd16, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (RotateLeft8 (RotateLeft8 x c) d)
+	// cond: c.Type.Size() == 1 && d.Type.Size() == 1
+	// result: (RotateLeft8 x (Add8 <c.Type> c d))
+	for {
+		if v_0.Op != OpRotateLeft8 {
+			break
+		}
+		c := v_0.Args[1]
+		x := v_0.Args[0]
+		d := v_1
+		if !(c.Type.Size() == 1 && d.Type.Size() == 1) {
+			break
+		}
+		v.reset(OpRotateLeft8)
+		v0 := b.NewValue0(v.Pos, OpAdd8, c.Type)
+		v0.AddArg2(c, d)
+		v.AddArg2(x, v0)
 		return true
 	}
 	return false
@@ -18775,6 +24262,21 @@ func rewriteValuegeneric_OpRound64F(v *Value) bool {
 			break
 		}
 		v.copyOf(x)
+		return true
+	}
+	return false
+}
+func rewriteValuegeneric_OpRoundToEven(v *Value) bool {
+	v_0 := v.Args[0]
+	// match: (RoundToEven (Const64F [c]))
+	// result: (Const64F [math.RoundToEven(c)])
+	for {
+		if v_0.Op != OpConst64F {
+			break
+		}
+		c := auxIntToFloat64(v_0.AuxInt)
+		v.reset(OpConst64F)
+		v.AuxInt = float64ToAuxInt(math.RoundToEven(c))
 		return true
 	}
 	return false
@@ -18941,6 +24443,30 @@ func rewriteValuegeneric_OpRsh16Ux64(v *Value) bool {
 		v.reset(OpRsh16Ux64)
 		v0 := b.NewValue0(v.Pos, OpConst64, t)
 		v0.AuxInt = int64ToAuxInt(15)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (Rsh16Ux64 i:(Lsh16x64 x (Const64 [c])) (Const64 [c]))
+	// cond: c >= 0 && c < 16 && i.Uses == 1
+	// result: (And16 x (Const16 <v.Type> [int16(^uint16(0)>>c)]))
+	for {
+		i := v_0
+		if i.Op != OpLsh16x64 {
+			break
+		}
+		_ = i.Args[1]
+		x := i.Args[0]
+		i_1 := i.Args[1]
+		if i_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(i_1.AuxInt)
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || !(c >= 0 && c < 16 && i.Uses == 1) {
+			break
+		}
+		v.reset(OpAnd16)
+		v0 := b.NewValue0(v.Pos, OpConst16, v.Type)
+		v0.AuxInt = int16ToAuxInt(int16(^uint16(0) >> c))
 		v.AddArg2(x, v0)
 		return true
 	}
@@ -19375,6 +24901,30 @@ func rewriteValuegeneric_OpRsh32Ux64(v *Value) bool {
 		v.reset(OpRsh32Ux64)
 		v0 := b.NewValue0(v.Pos, OpConst64, t)
 		v0.AuxInt = int64ToAuxInt(31)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (Rsh32Ux64 i:(Lsh32x64 x (Const64 [c])) (Const64 [c]))
+	// cond: c >= 0 && c < 32 && i.Uses == 1
+	// result: (And32 x (Const32 <v.Type> [int32(^uint32(0)>>c)]))
+	for {
+		i := v_0
+		if i.Op != OpLsh32x64 {
+			break
+		}
+		_ = i.Args[1]
+		x := i.Args[0]
+		i_1 := i.Args[1]
+		if i_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(i_1.AuxInt)
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || !(c >= 0 && c < 32 && i.Uses == 1) {
+			break
+		}
+		v.reset(OpAnd32)
+		v0 := b.NewValue0(v.Pos, OpConst32, v.Type)
+		v0.AuxInt = int32ToAuxInt(int32(^uint32(0) >> c))
 		v.AddArg2(x, v0)
 		return true
 	}
@@ -19845,6 +25395,30 @@ func rewriteValuegeneric_OpRsh64Ux64(v *Value) bool {
 		v.reset(OpRsh64Ux64)
 		v0 := b.NewValue0(v.Pos, OpConst64, t)
 		v0.AuxInt = int64ToAuxInt(63)
+		v.AddArg2(x, v0)
+		return true
+	}
+	// match: (Rsh64Ux64 i:(Lsh64x64 x (Const64 [c])) (Const64 [c]))
+	// cond: c >= 0 && c < 64 && i.Uses == 1
+	// result: (And64 x (Const64 <v.Type> [int64(^uint64(0)>>c)]))
+	for {
+		i := v_0
+		if i.Op != OpLsh64x64 {
+			break
+		}
+		_ = i.Args[1]
+		x := i.Args[0]
+		i_1 := i.Args[1]
+		if i_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(i_1.AuxInt)
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || !(c >= 0 && c < 64 && i.Uses == 1) {
+			break
+		}
+		v.reset(OpAnd64)
+		v0 := b.NewValue0(v.Pos, OpConst64, v.Type)
+		v0.AuxInt = int64ToAuxInt(int64(^uint64(0) >> c))
 		v.AddArg2(x, v0)
 		return true
 	}
@@ -20354,6 +25928,30 @@ func rewriteValuegeneric_OpRsh8Ux64(v *Value) bool {
 		v.AddArg2(x, v0)
 		return true
 	}
+	// match: (Rsh8Ux64 i:(Lsh8x64 x (Const64 [c])) (Const64 [c]))
+	// cond: c >= 0 && c < 8 && i.Uses == 1
+	// result: (And8 x (Const8 <v.Type> [int8 (^uint8 (0)>>c)]))
+	for {
+		i := v_0
+		if i.Op != OpLsh8x64 {
+			break
+		}
+		_ = i.Args[1]
+		x := i.Args[0]
+		i_1 := i.Args[1]
+		if i_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(i_1.AuxInt)
+		if v_1.Op != OpConst64 || auxIntToInt64(v_1.AuxInt) != c || !(c >= 0 && c < 8 && i.Uses == 1) {
+			break
+		}
+		v.reset(OpAnd8)
+		v0 := b.NewValue0(v.Pos, OpConst8, v.Type)
+		v0.AuxInt = int8ToAuxInt(int8(^uint8(0) >> c))
+		v.AddArg2(x, v0)
+		return true
+	}
 	// match: (Rsh8Ux64 (Lsh8x64 (Rsh8Ux64 x (Const64 [c1])) (Const64 [c2])) (Const64 [c3]))
 	// cond: uint64(c1) >= uint64(c2) && uint64(c3) >= uint64(c2) && !uaddOvf(c1-c2, c3)
 	// result: (Rsh8Ux64 x (Const64 <typ.UInt64> [c1-c2+c3]))
@@ -20604,6 +26202,82 @@ func rewriteValuegeneric_OpSelect0(v *Value) bool {
 		v.AddArg2(lo, y)
 		return true
 	}
+	// match: (Select0 (Mul32uover (Const32 [1]) x))
+	// result: x
+	for {
+		if v_0.Op != OpMul32uover {
+			break
+		}
+		_ = v_0.Args[1]
+		v_0_0 := v_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+			if v_0_0.Op != OpConst32 || auxIntToInt32(v_0_0.AuxInt) != 1 {
+				continue
+			}
+			x := v_0_1
+			v.copyOf(x)
+			return true
+		}
+		break
+	}
+	// match: (Select0 (Mul64uover (Const64 [1]) x))
+	// result: x
+	for {
+		if v_0.Op != OpMul64uover {
+			break
+		}
+		_ = v_0.Args[1]
+		v_0_0 := v_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+			if v_0_0.Op != OpConst64 || auxIntToInt64(v_0_0.AuxInt) != 1 {
+				continue
+			}
+			x := v_0_1
+			v.copyOf(x)
+			return true
+		}
+		break
+	}
+	// match: (Select0 (Mul64uover (Const64 [0]) x))
+	// result: (Const64 [0])
+	for {
+		if v_0.Op != OpMul64uover {
+			break
+		}
+		_ = v_0.Args[1]
+		v_0_0 := v_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+			if v_0_0.Op != OpConst64 || auxIntToInt64(v_0_0.AuxInt) != 0 {
+				continue
+			}
+			v.reset(OpConst64)
+			v.AuxInt = int64ToAuxInt(0)
+			return true
+		}
+		break
+	}
+	// match: (Select0 (Mul32uover (Const32 [0]) x))
+	// result: (Const32 [0])
+	for {
+		if v_0.Op != OpMul32uover {
+			break
+		}
+		_ = v_0.Args[1]
+		v_0_0 := v_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+			if v_0_0.Op != OpConst32 || auxIntToInt32(v_0_0.AuxInt) != 0 {
+				continue
+			}
+			v.reset(OpConst32)
+			v.AuxInt = int32ToAuxInt(0)
+			return true
+		}
+		break
+	}
 	return false
 }
 func rewriteValuegeneric_OpSelect1(v *Value) bool {
@@ -20622,6 +26296,390 @@ func rewriteValuegeneric_OpSelect1(v *Value) bool {
 		lo := v_0.Args[1]
 		v.reset(OpMod64u)
 		v.AddArg2(lo, y)
+		return true
+	}
+	// match: (Select1 (Mul32uover (Const32 [1]) x))
+	// result: (ConstBool [false])
+	for {
+		if v_0.Op != OpMul32uover {
+			break
+		}
+		_ = v_0.Args[1]
+		v_0_0 := v_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+			if v_0_0.Op != OpConst32 || auxIntToInt32(v_0_0.AuxInt) != 1 {
+				continue
+			}
+			v.reset(OpConstBool)
+			v.AuxInt = boolToAuxInt(false)
+			return true
+		}
+		break
+	}
+	// match: (Select1 (Mul64uover (Const64 [1]) x))
+	// result: (ConstBool [false])
+	for {
+		if v_0.Op != OpMul64uover {
+			break
+		}
+		_ = v_0.Args[1]
+		v_0_0 := v_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+			if v_0_0.Op != OpConst64 || auxIntToInt64(v_0_0.AuxInt) != 1 {
+				continue
+			}
+			v.reset(OpConstBool)
+			v.AuxInt = boolToAuxInt(false)
+			return true
+		}
+		break
+	}
+	// match: (Select1 (Mul64uover (Const64 [0]) x))
+	// result: (ConstBool [false])
+	for {
+		if v_0.Op != OpMul64uover {
+			break
+		}
+		_ = v_0.Args[1]
+		v_0_0 := v_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+			if v_0_0.Op != OpConst64 || auxIntToInt64(v_0_0.AuxInt) != 0 {
+				continue
+			}
+			v.reset(OpConstBool)
+			v.AuxInt = boolToAuxInt(false)
+			return true
+		}
+		break
+	}
+	// match: (Select1 (Mul32uover (Const32 [0]) x))
+	// result: (ConstBool [false])
+	for {
+		if v_0.Op != OpMul32uover {
+			break
+		}
+		_ = v_0.Args[1]
+		v_0_0 := v_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+			if v_0_0.Op != OpConst32 || auxIntToInt32(v_0_0.AuxInt) != 0 {
+				continue
+			}
+			v.reset(OpConstBool)
+			v.AuxInt = boolToAuxInt(false)
+			return true
+		}
+		break
+	}
+	return false
+}
+func rewriteValuegeneric_OpSelectN(v *Value) bool {
+	v_0 := v.Args[0]
+	b := v.Block
+	config := b.Func.Config
+	// match: (SelectN [0] (MakeResult x ___))
+	// result: x
+	for {
+		if auxIntToInt64(v.AuxInt) != 0 || v_0.Op != OpMakeResult || len(v_0.Args) < 1 {
+			break
+		}
+		x := v_0.Args[0]
+		v.copyOf(x)
+		return true
+	}
+	// match: (SelectN [1] (MakeResult x y ___))
+	// result: y
+	for {
+		if auxIntToInt64(v.AuxInt) != 1 || v_0.Op != OpMakeResult || len(v_0.Args) < 2 {
+			break
+		}
+		y := v_0.Args[1]
+		v.copyOf(y)
+		return true
+	}
+	// match: (SelectN [2] (MakeResult x y z ___))
+	// result: z
+	for {
+		if auxIntToInt64(v.AuxInt) != 2 || v_0.Op != OpMakeResult || len(v_0.Args) < 3 {
+			break
+		}
+		z := v_0.Args[2]
+		v.copyOf(z)
+		return true
+	}
+	// match: (SelectN [0] call:(StaticCall {sym} s1:(Store _ (Const64 [sz]) s2:(Store _ src s3:(Store {t} _ dst mem)))))
+	// cond: sz >= 0 && isSameCall(sym, "runtime.memmove") && s1.Uses == 1 && s2.Uses == 1 && s3.Uses == 1 && isInlinableMemmove(dst, src, int64(sz), config) && clobber(s1, s2, s3, call)
+	// result: (Move {types.Types[types.TUINT8]} [int64(sz)] dst src mem)
+	for {
+		if auxIntToInt64(v.AuxInt) != 0 {
+			break
+		}
+		call := v_0
+		if call.Op != OpStaticCall || len(call.Args) != 1 {
+			break
+		}
+		sym := auxToCall(call.Aux)
+		s1 := call.Args[0]
+		if s1.Op != OpStore {
+			break
+		}
+		_ = s1.Args[2]
+		s1_1 := s1.Args[1]
+		if s1_1.Op != OpConst64 {
+			break
+		}
+		sz := auxIntToInt64(s1_1.AuxInt)
+		s2 := s1.Args[2]
+		if s2.Op != OpStore {
+			break
+		}
+		_ = s2.Args[2]
+		src := s2.Args[1]
+		s3 := s2.Args[2]
+		if s3.Op != OpStore {
+			break
+		}
+		mem := s3.Args[2]
+		dst := s3.Args[1]
+		if !(sz >= 0 && isSameCall(sym, "runtime.memmove") && s1.Uses == 1 && s2.Uses == 1 && s3.Uses == 1 && isInlinableMemmove(dst, src, int64(sz), config) && clobber(s1, s2, s3, call)) {
+			break
+		}
+		v.reset(OpMove)
+		v.AuxInt = int64ToAuxInt(int64(sz))
+		v.Aux = typeToAux(types.Types[types.TUINT8])
+		v.AddArg3(dst, src, mem)
+		return true
+	}
+	// match: (SelectN [0] call:(StaticCall {sym} s1:(Store _ (Const32 [sz]) s2:(Store _ src s3:(Store {t} _ dst mem)))))
+	// cond: sz >= 0 && isSameCall(sym, "runtime.memmove") && s1.Uses == 1 && s2.Uses == 1 && s3.Uses == 1 && isInlinableMemmove(dst, src, int64(sz), config) && clobber(s1, s2, s3, call)
+	// result: (Move {types.Types[types.TUINT8]} [int64(sz)] dst src mem)
+	for {
+		if auxIntToInt64(v.AuxInt) != 0 {
+			break
+		}
+		call := v_0
+		if call.Op != OpStaticCall || len(call.Args) != 1 {
+			break
+		}
+		sym := auxToCall(call.Aux)
+		s1 := call.Args[0]
+		if s1.Op != OpStore {
+			break
+		}
+		_ = s1.Args[2]
+		s1_1 := s1.Args[1]
+		if s1_1.Op != OpConst32 {
+			break
+		}
+		sz := auxIntToInt32(s1_1.AuxInt)
+		s2 := s1.Args[2]
+		if s2.Op != OpStore {
+			break
+		}
+		_ = s2.Args[2]
+		src := s2.Args[1]
+		s3 := s2.Args[2]
+		if s3.Op != OpStore {
+			break
+		}
+		mem := s3.Args[2]
+		dst := s3.Args[1]
+		if !(sz >= 0 && isSameCall(sym, "runtime.memmove") && s1.Uses == 1 && s2.Uses == 1 && s3.Uses == 1 && isInlinableMemmove(dst, src, int64(sz), config) && clobber(s1, s2, s3, call)) {
+			break
+		}
+		v.reset(OpMove)
+		v.AuxInt = int64ToAuxInt(int64(sz))
+		v.Aux = typeToAux(types.Types[types.TUINT8])
+		v.AddArg3(dst, src, mem)
+		return true
+	}
+	// match: (SelectN [0] call:(StaticCall {sym} dst src (Const64 [sz]) mem))
+	// cond: sz >= 0 && call.Uses == 1 && isSameCall(sym, "runtime.memmove") && isInlinableMemmove(dst, src, int64(sz), config) && clobber(call)
+	// result: (Move {types.Types[types.TUINT8]} [int64(sz)] dst src mem)
+	for {
+		if auxIntToInt64(v.AuxInt) != 0 {
+			break
+		}
+		call := v_0
+		if call.Op != OpStaticCall || len(call.Args) != 4 {
+			break
+		}
+		sym := auxToCall(call.Aux)
+		mem := call.Args[3]
+		dst := call.Args[0]
+		src := call.Args[1]
+		call_2 := call.Args[2]
+		if call_2.Op != OpConst64 {
+			break
+		}
+		sz := auxIntToInt64(call_2.AuxInt)
+		if !(sz >= 0 && call.Uses == 1 && isSameCall(sym, "runtime.memmove") && isInlinableMemmove(dst, src, int64(sz), config) && clobber(call)) {
+			break
+		}
+		v.reset(OpMove)
+		v.AuxInt = int64ToAuxInt(int64(sz))
+		v.Aux = typeToAux(types.Types[types.TUINT8])
+		v.AddArg3(dst, src, mem)
+		return true
+	}
+	// match: (SelectN [0] call:(StaticCall {sym} dst src (Const32 [sz]) mem))
+	// cond: sz >= 0 && call.Uses == 1 && isSameCall(sym, "runtime.memmove") && isInlinableMemmove(dst, src, int64(sz), config) && clobber(call)
+	// result: (Move {types.Types[types.TUINT8]} [int64(sz)] dst src mem)
+	for {
+		if auxIntToInt64(v.AuxInt) != 0 {
+			break
+		}
+		call := v_0
+		if call.Op != OpStaticCall || len(call.Args) != 4 {
+			break
+		}
+		sym := auxToCall(call.Aux)
+		mem := call.Args[3]
+		dst := call.Args[0]
+		src := call.Args[1]
+		call_2 := call.Args[2]
+		if call_2.Op != OpConst32 {
+			break
+		}
+		sz := auxIntToInt32(call_2.AuxInt)
+		if !(sz >= 0 && call.Uses == 1 && isSameCall(sym, "runtime.memmove") && isInlinableMemmove(dst, src, int64(sz), config) && clobber(call)) {
+			break
+		}
+		v.reset(OpMove)
+		v.AuxInt = int64ToAuxInt(int64(sz))
+		v.Aux = typeToAux(types.Types[types.TUINT8])
+		v.AddArg3(dst, src, mem)
+		return true
+	}
+	// match: (SelectN [0] call:(StaticLECall {sym} dst src (Const64 [sz]) mem))
+	// cond: sz >= 0 && call.Uses == 1 && isSameCall(sym, "runtime.memmove") && isInlinableMemmove(dst, src, int64(sz), config) && clobber(call)
+	// result: (Move {types.Types[types.TUINT8]} [int64(sz)] dst src mem)
+	for {
+		if auxIntToInt64(v.AuxInt) != 0 {
+			break
+		}
+		call := v_0
+		if call.Op != OpStaticLECall || len(call.Args) != 4 {
+			break
+		}
+		sym := auxToCall(call.Aux)
+		mem := call.Args[3]
+		dst := call.Args[0]
+		src := call.Args[1]
+		call_2 := call.Args[2]
+		if call_2.Op != OpConst64 {
+			break
+		}
+		sz := auxIntToInt64(call_2.AuxInt)
+		if !(sz >= 0 && call.Uses == 1 && isSameCall(sym, "runtime.memmove") && isInlinableMemmove(dst, src, int64(sz), config) && clobber(call)) {
+			break
+		}
+		v.reset(OpMove)
+		v.AuxInt = int64ToAuxInt(int64(sz))
+		v.Aux = typeToAux(types.Types[types.TUINT8])
+		v.AddArg3(dst, src, mem)
+		return true
+	}
+	// match: (SelectN [0] call:(StaticLECall {sym} dst src (Const32 [sz]) mem))
+	// cond: sz >= 0 && call.Uses == 1 && isSameCall(sym, "runtime.memmove") && isInlinableMemmove(dst, src, int64(sz), config) && clobber(call)
+	// result: (Move {types.Types[types.TUINT8]} [int64(sz)] dst src mem)
+	for {
+		if auxIntToInt64(v.AuxInt) != 0 {
+			break
+		}
+		call := v_0
+		if call.Op != OpStaticLECall || len(call.Args) != 4 {
+			break
+		}
+		sym := auxToCall(call.Aux)
+		mem := call.Args[3]
+		dst := call.Args[0]
+		src := call.Args[1]
+		call_2 := call.Args[2]
+		if call_2.Op != OpConst32 {
+			break
+		}
+		sz := auxIntToInt32(call_2.AuxInt)
+		if !(sz >= 0 && call.Uses == 1 && isSameCall(sym, "runtime.memmove") && isInlinableMemmove(dst, src, int64(sz), config) && clobber(call)) {
+			break
+		}
+		v.reset(OpMove)
+		v.AuxInt = int64ToAuxInt(int64(sz))
+		v.Aux = typeToAux(types.Types[types.TUINT8])
+		v.AddArg3(dst, src, mem)
+		return true
+	}
+	// match: (SelectN [0] call:(StaticLECall {sym} a x))
+	// cond: needRaceCleanup(sym, call) && clobber(call)
+	// result: x
+	for {
+		if auxIntToInt64(v.AuxInt) != 0 {
+			break
+		}
+		call := v_0
+		if call.Op != OpStaticLECall || len(call.Args) != 2 {
+			break
+		}
+		sym := auxToCall(call.Aux)
+		x := call.Args[1]
+		if !(needRaceCleanup(sym, call) && clobber(call)) {
+			break
+		}
+		v.copyOf(x)
+		return true
+	}
+	// match: (SelectN [0] call:(StaticLECall {sym} x))
+	// cond: needRaceCleanup(sym, call) && clobber(call)
+	// result: x
+	for {
+		if auxIntToInt64(v.AuxInt) != 0 {
+			break
+		}
+		call := v_0
+		if call.Op != OpStaticLECall || len(call.Args) != 1 {
+			break
+		}
+		sym := auxToCall(call.Aux)
+		x := call.Args[0]
+		if !(needRaceCleanup(sym, call) && clobber(call)) {
+			break
+		}
+		v.copyOf(x)
+		return true
+	}
+	// match: (SelectN [1] (StaticCall {sym} _ newLen:(Const64) _ _ _ _))
+	// cond: v.Type.IsInteger() && isSameCall(sym, "runtime.growslice")
+	// result: newLen
+	for {
+		if auxIntToInt64(v.AuxInt) != 1 || v_0.Op != OpStaticCall || len(v_0.Args) != 6 {
+			break
+		}
+		sym := auxToCall(v_0.Aux)
+		_ = v_0.Args[1]
+		newLen := v_0.Args[1]
+		if newLen.Op != OpConst64 || !(v.Type.IsInteger() && isSameCall(sym, "runtime.growslice")) {
+			break
+		}
+		v.copyOf(newLen)
+		return true
+	}
+	// match: (SelectN [1] (StaticCall {sym} _ newLen:(Const32) _ _ _ _))
+	// cond: v.Type.IsInteger() && isSameCall(sym, "runtime.growslice")
+	// result: newLen
+	for {
+		if auxIntToInt64(v.AuxInt) != 1 || v_0.Op != OpStaticCall || len(v_0.Args) != 6 {
+			break
+		}
+		sym := auxToCall(v_0.Aux)
+		_ = v_0.Args[1]
+		newLen := v_0.Args[1]
+		if newLen.Op != OpConst32 || !(v.Type.IsInteger() && isSameCall(sym, "runtime.growslice")) {
+			break
+		}
+		v.copyOf(newLen)
 		return true
 	}
 	return false
@@ -20980,6 +27038,46 @@ func rewriteValuegeneric_OpSliceLen(v *Value) bool {
 		v.AddArg(x)
 		return true
 	}
+	// match: (SliceLen (SelectN [0] (StaticLECall {sym} _ newLen:(Const64) _ _ _ _)))
+	// cond: isSameCall(sym, "runtime.growslice")
+	// result: newLen
+	for {
+		if v_0.Op != OpSelectN || auxIntToInt64(v_0.AuxInt) != 0 {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpStaticLECall || len(v_0_0.Args) != 6 {
+			break
+		}
+		sym := auxToCall(v_0_0.Aux)
+		_ = v_0_0.Args[1]
+		newLen := v_0_0.Args[1]
+		if newLen.Op != OpConst64 || !(isSameCall(sym, "runtime.growslice")) {
+			break
+		}
+		v.copyOf(newLen)
+		return true
+	}
+	// match: (SliceLen (SelectN [0] (StaticLECall {sym} _ newLen:(Const32) _ _ _ _)))
+	// cond: isSameCall(sym, "runtime.growslice")
+	// result: newLen
+	for {
+		if v_0.Op != OpSelectN || auxIntToInt64(v_0.AuxInt) != 0 {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpStaticLECall || len(v_0_0.Args) != 6 {
+			break
+		}
+		sym := auxToCall(v_0_0.Aux)
+		_ = v_0_0.Args[1]
+		newLen := v_0_0.Args[1]
+		if newLen.Op != OpConst32 || !(isSameCall(sym, "runtime.growslice")) {
+			break
+		}
+		v.copyOf(newLen)
+		return true
+	}
 	return false
 }
 func rewriteValuegeneric_OpSlicePtr(v *Value) bool {
@@ -21074,94 +27172,140 @@ func rewriteValuegeneric_OpSqrt(v *Value) bool {
 	}
 	return false
 }
-func rewriteValuegeneric_OpStaticCall(v *Value) bool {
-	v_0 := v.Args[0]
+func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 	b := v.Block
 	config := b.Func.Config
-	// match: (StaticCall {sym} s1:(Store _ (Const64 [sz]) s2:(Store _ src s3:(Store {t} _ dst mem))))
-	// cond: sz >= 0 && symNamed(sym, "runtime.memmove") && t.IsPtr() && s1.Uses == 1 && s2.Uses == 1 && s3.Uses == 1 && isInlinableMemmove(dst, src, int64(sz), config) && clobber(s1, s2, s3)
-	// result: (Move {t.Elem()} [int64(sz)] dst src mem)
+	typ := &b.Func.Config.Types
+	// match: (StaticLECall {callAux} sptr (Addr {scon} (SB)) (Const64 [1]) mem)
+	// cond: isSameCall(callAux, "runtime.memequal") && symIsRO(scon)
+	// result: (MakeResult (Eq8 (Load <typ.Int8> sptr mem) (Const8 <typ.Int8> [int8(read8(scon,0))])) mem)
 	for {
-		sym := auxToSym(v.Aux)
-		s1 := v_0
-		if s1.Op != OpStore {
+		if len(v.Args) != 4 {
 			break
 		}
-		_ = s1.Args[2]
-		s1_1 := s1.Args[1]
-		if s1_1.Op != OpConst64 {
+		callAux := auxToCall(v.Aux)
+		mem := v.Args[3]
+		sptr := v.Args[0]
+		v_1 := v.Args[1]
+		if v_1.Op != OpAddr {
 			break
 		}
-		sz := auxIntToInt64(s1_1.AuxInt)
-		s2 := s1.Args[2]
-		if s2.Op != OpStore {
+		scon := auxToSym(v_1.Aux)
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpSB {
 			break
 		}
-		_ = s2.Args[2]
-		src := s2.Args[1]
-		s3 := s2.Args[2]
-		if s3.Op != OpStore {
+		v_2 := v.Args[2]
+		if v_2.Op != OpConst64 || auxIntToInt64(v_2.AuxInt) != 1 || !(isSameCall(callAux, "runtime.memequal") && symIsRO(scon)) {
 			break
 		}
-		t := auxToType(s3.Aux)
-		mem := s3.Args[2]
-		dst := s3.Args[1]
-		if !(sz >= 0 && symNamed(sym, "runtime.memmove") && t.IsPtr() && s1.Uses == 1 && s2.Uses == 1 && s3.Uses == 1 && isInlinableMemmove(dst, src, int64(sz), config) && clobber(s1, s2, s3)) {
-			break
-		}
-		v.reset(OpMove)
-		v.AuxInt = int64ToAuxInt(int64(sz))
-		v.Aux = typeToAux(t.Elem())
-		v.AddArg3(dst, src, mem)
+		v.reset(OpMakeResult)
+		v0 := b.NewValue0(v.Pos, OpEq8, typ.Bool)
+		v1 := b.NewValue0(v.Pos, OpLoad, typ.Int8)
+		v1.AddArg2(sptr, mem)
+		v2 := b.NewValue0(v.Pos, OpConst8, typ.Int8)
+		v2.AuxInt = int8ToAuxInt(int8(read8(scon, 0)))
+		v0.AddArg2(v1, v2)
+		v.AddArg2(v0, mem)
 		return true
 	}
-	// match: (StaticCall {sym} s1:(Store _ (Const32 [sz]) s2:(Store _ src s3:(Store {t} _ dst mem))))
-	// cond: sz >= 0 && symNamed(sym, "runtime.memmove") && t.IsPtr() && s1.Uses == 1 && s2.Uses == 1 && s3.Uses == 1 && isInlinableMemmove(dst, src, int64(sz), config) && clobber(s1, s2, s3)
-	// result: (Move {t.Elem()} [int64(sz)] dst src mem)
+	// match: (StaticLECall {callAux} sptr (Addr {scon} (SB)) (Const64 [2]) mem)
+	// cond: isSameCall(callAux, "runtime.memequal") && symIsRO(scon) && canLoadUnaligned(config)
+	// result: (MakeResult (Eq16 (Load <typ.Int16> sptr mem) (Const16 <typ.Int16> [int16(read16(scon,0,config.ctxt.Arch.ByteOrder))])) mem)
 	for {
-		sym := auxToSym(v.Aux)
-		s1 := v_0
-		if s1.Op != OpStore {
+		if len(v.Args) != 4 {
 			break
 		}
-		_ = s1.Args[2]
-		s1_1 := s1.Args[1]
-		if s1_1.Op != OpConst32 {
+		callAux := auxToCall(v.Aux)
+		mem := v.Args[3]
+		sptr := v.Args[0]
+		v_1 := v.Args[1]
+		if v_1.Op != OpAddr {
 			break
 		}
-		sz := auxIntToInt32(s1_1.AuxInt)
-		s2 := s1.Args[2]
-		if s2.Op != OpStore {
+		scon := auxToSym(v_1.Aux)
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpSB {
 			break
 		}
-		_ = s2.Args[2]
-		src := s2.Args[1]
-		s3 := s2.Args[2]
-		if s3.Op != OpStore {
+		v_2 := v.Args[2]
+		if v_2.Op != OpConst64 || auxIntToInt64(v_2.AuxInt) != 2 || !(isSameCall(callAux, "runtime.memequal") && symIsRO(scon) && canLoadUnaligned(config)) {
 			break
 		}
-		t := auxToType(s3.Aux)
-		mem := s3.Args[2]
-		dst := s3.Args[1]
-		if !(sz >= 0 && symNamed(sym, "runtime.memmove") && t.IsPtr() && s1.Uses == 1 && s2.Uses == 1 && s3.Uses == 1 && isInlinableMemmove(dst, src, int64(sz), config) && clobber(s1, s2, s3)) {
-			break
-		}
-		v.reset(OpMove)
-		v.AuxInt = int64ToAuxInt(int64(sz))
-		v.Aux = typeToAux(t.Elem())
-		v.AddArg3(dst, src, mem)
+		v.reset(OpMakeResult)
+		v0 := b.NewValue0(v.Pos, OpEq16, typ.Bool)
+		v1 := b.NewValue0(v.Pos, OpLoad, typ.Int16)
+		v1.AddArg2(sptr, mem)
+		v2 := b.NewValue0(v.Pos, OpConst16, typ.Int16)
+		v2.AuxInt = int16ToAuxInt(int16(read16(scon, 0, config.ctxt.Arch.ByteOrder)))
+		v0.AddArg2(v1, v2)
+		v.AddArg2(v0, mem)
 		return true
 	}
-	// match: (StaticCall {sym} x)
-	// cond: needRaceCleanup(sym, v)
-	// result: x
+	// match: (StaticLECall {callAux} sptr (Addr {scon} (SB)) (Const64 [4]) mem)
+	// cond: isSameCall(callAux, "runtime.memequal") && symIsRO(scon) && canLoadUnaligned(config)
+	// result: (MakeResult (Eq32 (Load <typ.Int32> sptr mem) (Const32 <typ.Int32> [int32(read32(scon,0,config.ctxt.Arch.ByteOrder))])) mem)
 	for {
-		sym := auxToSym(v.Aux)
-		x := v_0
-		if !(needRaceCleanup(sym, v)) {
+		if len(v.Args) != 4 {
 			break
 		}
-		v.copyOf(x)
+		callAux := auxToCall(v.Aux)
+		mem := v.Args[3]
+		sptr := v.Args[0]
+		v_1 := v.Args[1]
+		if v_1.Op != OpAddr {
+			break
+		}
+		scon := auxToSym(v_1.Aux)
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpSB {
+			break
+		}
+		v_2 := v.Args[2]
+		if v_2.Op != OpConst64 || auxIntToInt64(v_2.AuxInt) != 4 || !(isSameCall(callAux, "runtime.memequal") && symIsRO(scon) && canLoadUnaligned(config)) {
+			break
+		}
+		v.reset(OpMakeResult)
+		v0 := b.NewValue0(v.Pos, OpEq32, typ.Bool)
+		v1 := b.NewValue0(v.Pos, OpLoad, typ.Int32)
+		v1.AddArg2(sptr, mem)
+		v2 := b.NewValue0(v.Pos, OpConst32, typ.Int32)
+		v2.AuxInt = int32ToAuxInt(int32(read32(scon, 0, config.ctxt.Arch.ByteOrder)))
+		v0.AddArg2(v1, v2)
+		v.AddArg2(v0, mem)
+		return true
+	}
+	// match: (StaticLECall {callAux} sptr (Addr {scon} (SB)) (Const64 [8]) mem)
+	// cond: isSameCall(callAux, "runtime.memequal") && symIsRO(scon) && canLoadUnaligned(config) && config.PtrSize == 8
+	// result: (MakeResult (Eq64 (Load <typ.Int64> sptr mem) (Const64 <typ.Int64> [int64(read64(scon,0,config.ctxt.Arch.ByteOrder))])) mem)
+	for {
+		if len(v.Args) != 4 {
+			break
+		}
+		callAux := auxToCall(v.Aux)
+		mem := v.Args[3]
+		sptr := v.Args[0]
+		v_1 := v.Args[1]
+		if v_1.Op != OpAddr {
+			break
+		}
+		scon := auxToSym(v_1.Aux)
+		v_1_0 := v_1.Args[0]
+		if v_1_0.Op != OpSB {
+			break
+		}
+		v_2 := v.Args[2]
+		if v_2.Op != OpConst64 || auxIntToInt64(v_2.AuxInt) != 8 || !(isSameCall(callAux, "runtime.memequal") && symIsRO(scon) && canLoadUnaligned(config) && config.PtrSize == 8) {
+			break
+		}
+		v.reset(OpMakeResult)
+		v0 := b.NewValue0(v.Pos, OpEq64, typ.Bool)
+		v1 := b.NewValue0(v.Pos, OpLoad, typ.Int64)
+		v1.AddArg2(sptr, mem)
+		v2 := b.NewValue0(v.Pos, OpConst64, typ.Int64)
+		v2.AuxInt = int64ToAuxInt(int64(read64(scon, 0, config.ctxt.Arch.ByteOrder)))
+		v0.AddArg2(v1, v2)
+		v.AddArg2(v0, mem)
 		return true
 	}
 	return false
@@ -21171,7 +27315,6 @@ func rewriteValuegeneric_OpStore(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
-	config := b.Func.Config
 	fe := b.Func.fe
 	// match: (Store {t1} p1 (Load <t2> p2 mem) mem)
 	// cond: isSamePtr(p1, p2) && t2.Size() == t1.Size()
@@ -21619,53 +27762,43 @@ func rewriteValuegeneric_OpStore(v *Value) bool {
 		v.AddArg3(dst, e, mem)
 		return true
 	}
-	// match: (Store (Load (OffPtr [c] (SP)) mem) x mem)
-	// cond: isConstZero(x) && mem.Op == OpStaticCall && isSameSym(mem.Aux, "runtime.newobject") && c == config.ctxt.FixedFrameSize() + config.RegSize
+	// match: (Store (SelectN [0] call:(StaticLECall _ _)) x mem:(SelectN [1] call))
+	// cond: isConstZero(x) && isSameCall(call.Aux, "runtime.newobject")
 	// result: mem
 	for {
-		if v_0.Op != OpLoad {
+		if v_0.Op != OpSelectN || auxIntToInt64(v_0.AuxInt) != 0 {
 			break
 		}
-		mem := v_0.Args[1]
-		v_0_0 := v_0.Args[0]
-		if v_0_0.Op != OpOffPtr {
-			break
-		}
-		c := auxIntToInt64(v_0_0.AuxInt)
-		v_0_0_0 := v_0_0.Args[0]
-		if v_0_0_0.Op != OpSP {
+		call := v_0.Args[0]
+		if call.Op != OpStaticLECall || len(call.Args) != 2 {
 			break
 		}
 		x := v_1
-		if mem != v_2 || !(isConstZero(x) && mem.Op == OpStaticCall && isSameSym(mem.Aux, "runtime.newobject") && c == config.ctxt.FixedFrameSize()+config.RegSize) {
+		mem := v_2
+		if mem.Op != OpSelectN || auxIntToInt64(mem.AuxInt) != 1 || call != mem.Args[0] || !(isConstZero(x) && isSameCall(call.Aux, "runtime.newobject")) {
 			break
 		}
 		v.copyOf(mem)
 		return true
 	}
-	// match: (Store (OffPtr (Load (OffPtr [c] (SP)) mem)) x mem)
-	// cond: isConstZero(x) && mem.Op == OpStaticCall && isSameSym(mem.Aux, "runtime.newobject") && c == config.ctxt.FixedFrameSize() + config.RegSize
+	// match: (Store (OffPtr (SelectN [0] call:(StaticLECall _ _))) x mem:(SelectN [1] call))
+	// cond: isConstZero(x) && isSameCall(call.Aux, "runtime.newobject")
 	// result: mem
 	for {
 		if v_0.Op != OpOffPtr {
 			break
 		}
 		v_0_0 := v_0.Args[0]
-		if v_0_0.Op != OpLoad {
+		if v_0_0.Op != OpSelectN || auxIntToInt64(v_0_0.AuxInt) != 0 {
 			break
 		}
-		mem := v_0_0.Args[1]
-		v_0_0_0 := v_0_0.Args[0]
-		if v_0_0_0.Op != OpOffPtr {
-			break
-		}
-		c := auxIntToInt64(v_0_0_0.AuxInt)
-		v_0_0_0_0 := v_0_0_0.Args[0]
-		if v_0_0_0_0.Op != OpSP {
+		call := v_0_0.Args[0]
+		if call.Op != OpStaticLECall || len(call.Args) != 2 {
 			break
 		}
 		x := v_1
-		if mem != v_2 || !(isConstZero(x) && mem.Op == OpStaticCall && isSameSym(mem.Aux, "runtime.newobject") && c == config.ctxt.FixedFrameSize()+config.RegSize) {
+		mem := v_2
+		if mem.Op != OpSelectN || auxIntToInt64(mem.AuxInt) != 1 || call != mem.Args[0] || !(isConstZero(x) && isSameCall(call.Aux, "runtime.newobject")) {
 			break
 		}
 		v.copyOf(mem)
@@ -22289,6 +28422,34 @@ func rewriteValuegeneric_OpSub16(v *Value) bool {
 		v.AuxInt = int16ToAuxInt(0)
 		return true
 	}
+	// match: (Sub16 (Neg16 x) (Com16 x))
+	// result: (Const16 [1])
+	for {
+		if v_0.Op != OpNeg16 {
+			break
+		}
+		x := v_0.Args[0]
+		if v_1.Op != OpCom16 || x != v_1.Args[0] {
+			break
+		}
+		v.reset(OpConst16)
+		v.AuxInt = int16ToAuxInt(1)
+		return true
+	}
+	// match: (Sub16 (Com16 x) (Neg16 x))
+	// result: (Const16 [-1])
+	for {
+		if v_0.Op != OpCom16 {
+			break
+		}
+		x := v_0.Args[0]
+		if v_1.Op != OpNeg16 || x != v_1.Args[0] {
+			break
+		}
+		v.reset(OpConst16)
+		v.AuxInt = int16ToAuxInt(-1)
+		return true
+	}
 	// match: (Sub16 (Add16 x y) x)
 	// result: y
 	for {
@@ -22329,6 +28490,42 @@ func rewriteValuegeneric_OpSub16(v *Value) bool {
 		}
 		break
 	}
+	// match: (Sub16 (Sub16 x y) x)
+	// result: (Neg16 y)
+	for {
+		if v_0.Op != OpSub16 {
+			break
+		}
+		y := v_0.Args[1]
+		x := v_0.Args[0]
+		if x != v_1 {
+			break
+		}
+		v.reset(OpNeg16)
+		v.AddArg(y)
+		return true
+	}
+	// match: (Sub16 x (Add16 x y))
+	// result: (Neg16 y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd16 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			if x != v_1_0 {
+				continue
+			}
+			y := v_1_1
+			v.reset(OpNeg16)
+			v.AddArg(y)
+			return true
+		}
+		break
+	}
 	// match: (Sub16 x (Sub16 i:(Const16 <t>) z))
 	// cond: (z.Op != OpConst16 && x.Op != OpConst16)
 	// result: (Sub16 (Add16 <t> x z) i)
@@ -22352,53 +28549,86 @@ func rewriteValuegeneric_OpSub16(v *Value) bool {
 		v.AddArg2(v0, i)
 		return true
 	}
-	// match: (Sub16 x (Sub16 z i:(Const16 <t>)))
+	// match: (Sub16 x (Add16 z i:(Const16 <t>)))
 	// cond: (z.Op != OpConst16 && x.Op != OpConst16)
-	// result: (Add16 i (Sub16 <t> x z))
+	// result: (Sub16 (Sub16 <t> x z) i)
 	for {
 		x := v_0
-		if v_1.Op != OpSub16 {
+		if v_1.Op != OpAdd16 {
 			break
 		}
 		_ = v_1.Args[1]
-		z := v_1.Args[0]
-		i := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			z := v_1_0
+			i := v_1_1
+			if i.Op != OpConst16 {
+				continue
+			}
+			t := i.Type
+			if !(z.Op != OpConst16 && x.Op != OpConst16) {
+				continue
+			}
+			v.reset(OpSub16)
+			v0 := b.NewValue0(v.Pos, OpSub16, t)
+			v0.AddArg2(x, z)
+			v.AddArg2(v0, i)
+			return true
+		}
+		break
+	}
+	// match: (Sub16 (Sub16 i:(Const16 <t>) z) x)
+	// cond: (z.Op != OpConst16 && x.Op != OpConst16)
+	// result: (Sub16 i (Add16 <t> z x))
+	for {
+		if v_0.Op != OpSub16 {
+			break
+		}
+		z := v_0.Args[1]
+		i := v_0.Args[0]
 		if i.Op != OpConst16 {
 			break
 		}
 		t := i.Type
+		x := v_1
 		if !(z.Op != OpConst16 && x.Op != OpConst16) {
 			break
 		}
-		v.reset(OpAdd16)
-		v0 := b.NewValue0(v.Pos, OpSub16, t)
-		v0.AddArg2(x, z)
+		v.reset(OpSub16)
+		v0 := b.NewValue0(v.Pos, OpAdd16, t)
+		v0.AddArg2(z, x)
 		v.AddArg2(i, v0)
 		return true
 	}
-	// match: (Sub16 (Const16 <t> [c]) (Sub16 x (Const16 <t> [d])))
-	// result: (Sub16 (Const16 <t> [c+d]) x)
+	// match: (Sub16 (Add16 z i:(Const16 <t>)) x)
+	// cond: (z.Op != OpConst16 && x.Op != OpConst16)
+	// result: (Add16 i (Sub16 <t> z x))
 	for {
-		if v_0.Op != OpConst16 {
+		if v_0.Op != OpAdd16 {
 			break
 		}
-		t := v_0.Type
-		c := auxIntToInt16(v_0.AuxInt)
-		if v_1.Op != OpSub16 {
-			break
+		_ = v_0.Args[1]
+		v_0_0 := v_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+			z := v_0_0
+			i := v_0_1
+			if i.Op != OpConst16 {
+				continue
+			}
+			t := i.Type
+			x := v_1
+			if !(z.Op != OpConst16 && x.Op != OpConst16) {
+				continue
+			}
+			v.reset(OpAdd16)
+			v0 := b.NewValue0(v.Pos, OpSub16, t)
+			v0.AddArg2(z, x)
+			v.AddArg2(i, v0)
+			return true
 		}
-		_ = v_1.Args[1]
-		x := v_1.Args[0]
-		v_1_1 := v_1.Args[1]
-		if v_1_1.Op != OpConst16 || v_1_1.Type != t {
-			break
-		}
-		d := auxIntToInt16(v_1_1.AuxInt)
-		v.reset(OpSub16)
-		v0 := b.NewValue0(v.Pos, OpConst16, t)
-		v0.AuxInt = int16ToAuxInt(c + d)
-		v.AddArg2(v0, x)
-		return true
+		break
 	}
 	// match: (Sub16 (Const16 <t> [c]) (Sub16 (Const16 <t> [d]) x))
 	// result: (Add16 (Const16 <t> [c-d]) x)
@@ -22422,6 +28652,34 @@ func rewriteValuegeneric_OpSub16(v *Value) bool {
 		v0.AuxInt = int16ToAuxInt(c - d)
 		v.AddArg2(v0, x)
 		return true
+	}
+	// match: (Sub16 (Const16 <t> [c]) (Add16 (Const16 <t> [d]) x))
+	// result: (Sub16 (Const16 <t> [c-d]) x)
+	for {
+		if v_0.Op != OpConst16 {
+			break
+		}
+		t := v_0.Type
+		c := auxIntToInt16(v_0.AuxInt)
+		if v_1.Op != OpAdd16 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			if v_1_0.Op != OpConst16 || v_1_0.Type != t {
+				continue
+			}
+			d := auxIntToInt16(v_1_0.AuxInt)
+			x := v_1_1
+			v.reset(OpSub16)
+			v0 := b.NewValue0(v.Pos, OpConst16, t)
+			v0.AuxInt = int16ToAuxInt(c - d)
+			v.AddArg2(v0, x)
+			return true
+		}
+		break
 	}
 	return false
 }
@@ -22507,6 +28765,34 @@ func rewriteValuegeneric_OpSub32(v *Value) bool {
 		v.AuxInt = int32ToAuxInt(0)
 		return true
 	}
+	// match: (Sub32 (Neg32 x) (Com32 x))
+	// result: (Const32 [1])
+	for {
+		if v_0.Op != OpNeg32 {
+			break
+		}
+		x := v_0.Args[0]
+		if v_1.Op != OpCom32 || x != v_1.Args[0] {
+			break
+		}
+		v.reset(OpConst32)
+		v.AuxInt = int32ToAuxInt(1)
+		return true
+	}
+	// match: (Sub32 (Com32 x) (Neg32 x))
+	// result: (Const32 [-1])
+	for {
+		if v_0.Op != OpCom32 {
+			break
+		}
+		x := v_0.Args[0]
+		if v_1.Op != OpNeg32 || x != v_1.Args[0] {
+			break
+		}
+		v.reset(OpConst32)
+		v.AuxInt = int32ToAuxInt(-1)
+		return true
+	}
 	// match: (Sub32 (Add32 x y) x)
 	// result: y
 	for {
@@ -22547,6 +28833,42 @@ func rewriteValuegeneric_OpSub32(v *Value) bool {
 		}
 		break
 	}
+	// match: (Sub32 (Sub32 x y) x)
+	// result: (Neg32 y)
+	for {
+		if v_0.Op != OpSub32 {
+			break
+		}
+		y := v_0.Args[1]
+		x := v_0.Args[0]
+		if x != v_1 {
+			break
+		}
+		v.reset(OpNeg32)
+		v.AddArg(y)
+		return true
+	}
+	// match: (Sub32 x (Add32 x y))
+	// result: (Neg32 y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd32 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			if x != v_1_0 {
+				continue
+			}
+			y := v_1_1
+			v.reset(OpNeg32)
+			v.AddArg(y)
+			return true
+		}
+		break
+	}
 	// match: (Sub32 x (Sub32 i:(Const32 <t>) z))
 	// cond: (z.Op != OpConst32 && x.Op != OpConst32)
 	// result: (Sub32 (Add32 <t> x z) i)
@@ -22570,53 +28892,86 @@ func rewriteValuegeneric_OpSub32(v *Value) bool {
 		v.AddArg2(v0, i)
 		return true
 	}
-	// match: (Sub32 x (Sub32 z i:(Const32 <t>)))
+	// match: (Sub32 x (Add32 z i:(Const32 <t>)))
 	// cond: (z.Op != OpConst32 && x.Op != OpConst32)
-	// result: (Add32 i (Sub32 <t> x z))
+	// result: (Sub32 (Sub32 <t> x z) i)
 	for {
 		x := v_0
-		if v_1.Op != OpSub32 {
+		if v_1.Op != OpAdd32 {
 			break
 		}
 		_ = v_1.Args[1]
-		z := v_1.Args[0]
-		i := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			z := v_1_0
+			i := v_1_1
+			if i.Op != OpConst32 {
+				continue
+			}
+			t := i.Type
+			if !(z.Op != OpConst32 && x.Op != OpConst32) {
+				continue
+			}
+			v.reset(OpSub32)
+			v0 := b.NewValue0(v.Pos, OpSub32, t)
+			v0.AddArg2(x, z)
+			v.AddArg2(v0, i)
+			return true
+		}
+		break
+	}
+	// match: (Sub32 (Sub32 i:(Const32 <t>) z) x)
+	// cond: (z.Op != OpConst32 && x.Op != OpConst32)
+	// result: (Sub32 i (Add32 <t> z x))
+	for {
+		if v_0.Op != OpSub32 {
+			break
+		}
+		z := v_0.Args[1]
+		i := v_0.Args[0]
 		if i.Op != OpConst32 {
 			break
 		}
 		t := i.Type
+		x := v_1
 		if !(z.Op != OpConst32 && x.Op != OpConst32) {
 			break
 		}
-		v.reset(OpAdd32)
-		v0 := b.NewValue0(v.Pos, OpSub32, t)
-		v0.AddArg2(x, z)
+		v.reset(OpSub32)
+		v0 := b.NewValue0(v.Pos, OpAdd32, t)
+		v0.AddArg2(z, x)
 		v.AddArg2(i, v0)
 		return true
 	}
-	// match: (Sub32 (Const32 <t> [c]) (Sub32 x (Const32 <t> [d])))
-	// result: (Sub32 (Const32 <t> [c+d]) x)
+	// match: (Sub32 (Add32 z i:(Const32 <t>)) x)
+	// cond: (z.Op != OpConst32 && x.Op != OpConst32)
+	// result: (Add32 i (Sub32 <t> z x))
 	for {
-		if v_0.Op != OpConst32 {
+		if v_0.Op != OpAdd32 {
 			break
 		}
-		t := v_0.Type
-		c := auxIntToInt32(v_0.AuxInt)
-		if v_1.Op != OpSub32 {
-			break
+		_ = v_0.Args[1]
+		v_0_0 := v_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+			z := v_0_0
+			i := v_0_1
+			if i.Op != OpConst32 {
+				continue
+			}
+			t := i.Type
+			x := v_1
+			if !(z.Op != OpConst32 && x.Op != OpConst32) {
+				continue
+			}
+			v.reset(OpAdd32)
+			v0 := b.NewValue0(v.Pos, OpSub32, t)
+			v0.AddArg2(z, x)
+			v.AddArg2(i, v0)
+			return true
 		}
-		_ = v_1.Args[1]
-		x := v_1.Args[0]
-		v_1_1 := v_1.Args[1]
-		if v_1_1.Op != OpConst32 || v_1_1.Type != t {
-			break
-		}
-		d := auxIntToInt32(v_1_1.AuxInt)
-		v.reset(OpSub32)
-		v0 := b.NewValue0(v.Pos, OpConst32, t)
-		v0.AuxInt = int32ToAuxInt(c + d)
-		v.AddArg2(v0, x)
-		return true
+		break
 	}
 	// match: (Sub32 (Const32 <t> [c]) (Sub32 (Const32 <t> [d]) x))
 	// result: (Add32 (Const32 <t> [c-d]) x)
@@ -22640,6 +28995,34 @@ func rewriteValuegeneric_OpSub32(v *Value) bool {
 		v0.AuxInt = int32ToAuxInt(c - d)
 		v.AddArg2(v0, x)
 		return true
+	}
+	// match: (Sub32 (Const32 <t> [c]) (Add32 (Const32 <t> [d]) x))
+	// result: (Sub32 (Const32 <t> [c-d]) x)
+	for {
+		if v_0.Op != OpConst32 {
+			break
+		}
+		t := v_0.Type
+		c := auxIntToInt32(v_0.AuxInt)
+		if v_1.Op != OpAdd32 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			if v_1_0.Op != OpConst32 || v_1_0.Type != t {
+				continue
+			}
+			d := auxIntToInt32(v_1_0.AuxInt)
+			x := v_1_1
+			v.reset(OpSub32)
+			v0 := b.NewValue0(v.Pos, OpConst32, t)
+			v0.AuxInt = int32ToAuxInt(c - d)
+			v.AddArg2(v0, x)
+			return true
+		}
+		break
 	}
 	return false
 }
@@ -22749,6 +29132,34 @@ func rewriteValuegeneric_OpSub64(v *Value) bool {
 		v.AuxInt = int64ToAuxInt(0)
 		return true
 	}
+	// match: (Sub64 (Neg64 x) (Com64 x))
+	// result: (Const64 [1])
+	for {
+		if v_0.Op != OpNeg64 {
+			break
+		}
+		x := v_0.Args[0]
+		if v_1.Op != OpCom64 || x != v_1.Args[0] {
+			break
+		}
+		v.reset(OpConst64)
+		v.AuxInt = int64ToAuxInt(1)
+		return true
+	}
+	// match: (Sub64 (Com64 x) (Neg64 x))
+	// result: (Const64 [-1])
+	for {
+		if v_0.Op != OpCom64 {
+			break
+		}
+		x := v_0.Args[0]
+		if v_1.Op != OpNeg64 || x != v_1.Args[0] {
+			break
+		}
+		v.reset(OpConst64)
+		v.AuxInt = int64ToAuxInt(-1)
+		return true
+	}
 	// match: (Sub64 (Add64 x y) x)
 	// result: y
 	for {
@@ -22789,6 +29200,42 @@ func rewriteValuegeneric_OpSub64(v *Value) bool {
 		}
 		break
 	}
+	// match: (Sub64 (Sub64 x y) x)
+	// result: (Neg64 y)
+	for {
+		if v_0.Op != OpSub64 {
+			break
+		}
+		y := v_0.Args[1]
+		x := v_0.Args[0]
+		if x != v_1 {
+			break
+		}
+		v.reset(OpNeg64)
+		v.AddArg(y)
+		return true
+	}
+	// match: (Sub64 x (Add64 x y))
+	// result: (Neg64 y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd64 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			if x != v_1_0 {
+				continue
+			}
+			y := v_1_1
+			v.reset(OpNeg64)
+			v.AddArg(y)
+			return true
+		}
+		break
+	}
 	// match: (Sub64 x (Sub64 i:(Const64 <t>) z))
 	// cond: (z.Op != OpConst64 && x.Op != OpConst64)
 	// result: (Sub64 (Add64 <t> x z) i)
@@ -22812,53 +29259,86 @@ func rewriteValuegeneric_OpSub64(v *Value) bool {
 		v.AddArg2(v0, i)
 		return true
 	}
-	// match: (Sub64 x (Sub64 z i:(Const64 <t>)))
+	// match: (Sub64 x (Add64 z i:(Const64 <t>)))
 	// cond: (z.Op != OpConst64 && x.Op != OpConst64)
-	// result: (Add64 i (Sub64 <t> x z))
+	// result: (Sub64 (Sub64 <t> x z) i)
 	for {
 		x := v_0
-		if v_1.Op != OpSub64 {
+		if v_1.Op != OpAdd64 {
 			break
 		}
 		_ = v_1.Args[1]
-		z := v_1.Args[0]
-		i := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			z := v_1_0
+			i := v_1_1
+			if i.Op != OpConst64 {
+				continue
+			}
+			t := i.Type
+			if !(z.Op != OpConst64 && x.Op != OpConst64) {
+				continue
+			}
+			v.reset(OpSub64)
+			v0 := b.NewValue0(v.Pos, OpSub64, t)
+			v0.AddArg2(x, z)
+			v.AddArg2(v0, i)
+			return true
+		}
+		break
+	}
+	// match: (Sub64 (Sub64 i:(Const64 <t>) z) x)
+	// cond: (z.Op != OpConst64 && x.Op != OpConst64)
+	// result: (Sub64 i (Add64 <t> z x))
+	for {
+		if v_0.Op != OpSub64 {
+			break
+		}
+		z := v_0.Args[1]
+		i := v_0.Args[0]
 		if i.Op != OpConst64 {
 			break
 		}
 		t := i.Type
+		x := v_1
 		if !(z.Op != OpConst64 && x.Op != OpConst64) {
 			break
 		}
-		v.reset(OpAdd64)
-		v0 := b.NewValue0(v.Pos, OpSub64, t)
-		v0.AddArg2(x, z)
+		v.reset(OpSub64)
+		v0 := b.NewValue0(v.Pos, OpAdd64, t)
+		v0.AddArg2(z, x)
 		v.AddArg2(i, v0)
 		return true
 	}
-	// match: (Sub64 (Const64 <t> [c]) (Sub64 x (Const64 <t> [d])))
-	// result: (Sub64 (Const64 <t> [c+d]) x)
+	// match: (Sub64 (Add64 z i:(Const64 <t>)) x)
+	// cond: (z.Op != OpConst64 && x.Op != OpConst64)
+	// result: (Add64 i (Sub64 <t> z x))
 	for {
-		if v_0.Op != OpConst64 {
+		if v_0.Op != OpAdd64 {
 			break
 		}
-		t := v_0.Type
-		c := auxIntToInt64(v_0.AuxInt)
-		if v_1.Op != OpSub64 {
-			break
+		_ = v_0.Args[1]
+		v_0_0 := v_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+			z := v_0_0
+			i := v_0_1
+			if i.Op != OpConst64 {
+				continue
+			}
+			t := i.Type
+			x := v_1
+			if !(z.Op != OpConst64 && x.Op != OpConst64) {
+				continue
+			}
+			v.reset(OpAdd64)
+			v0 := b.NewValue0(v.Pos, OpSub64, t)
+			v0.AddArg2(z, x)
+			v.AddArg2(i, v0)
+			return true
 		}
-		_ = v_1.Args[1]
-		x := v_1.Args[0]
-		v_1_1 := v_1.Args[1]
-		if v_1_1.Op != OpConst64 || v_1_1.Type != t {
-			break
-		}
-		d := auxIntToInt64(v_1_1.AuxInt)
-		v.reset(OpSub64)
-		v0 := b.NewValue0(v.Pos, OpConst64, t)
-		v0.AuxInt = int64ToAuxInt(c + d)
-		v.AddArg2(v0, x)
-		return true
+		break
 	}
 	// match: (Sub64 (Const64 <t> [c]) (Sub64 (Const64 <t> [d]) x))
 	// result: (Add64 (Const64 <t> [c-d]) x)
@@ -22882,6 +29362,34 @@ func rewriteValuegeneric_OpSub64(v *Value) bool {
 		v0.AuxInt = int64ToAuxInt(c - d)
 		v.AddArg2(v0, x)
 		return true
+	}
+	// match: (Sub64 (Const64 <t> [c]) (Add64 (Const64 <t> [d]) x))
+	// result: (Sub64 (Const64 <t> [c-d]) x)
+	for {
+		if v_0.Op != OpConst64 {
+			break
+		}
+		t := v_0.Type
+		c := auxIntToInt64(v_0.AuxInt)
+		if v_1.Op != OpAdd64 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			if v_1_0.Op != OpConst64 || v_1_0.Type != t {
+				continue
+			}
+			d := auxIntToInt64(v_1_0.AuxInt)
+			x := v_1_1
+			v.reset(OpSub64)
+			v0 := b.NewValue0(v.Pos, OpConst64, t)
+			v0.AuxInt = int64ToAuxInt(c - d)
+			v.AddArg2(v0, x)
+			return true
+		}
+		break
 	}
 	return false
 }
@@ -22991,6 +29499,34 @@ func rewriteValuegeneric_OpSub8(v *Value) bool {
 		v.AuxInt = int8ToAuxInt(0)
 		return true
 	}
+	// match: (Sub8 (Neg8 x) (Com8 x))
+	// result: (Const8 [1])
+	for {
+		if v_0.Op != OpNeg8 {
+			break
+		}
+		x := v_0.Args[0]
+		if v_1.Op != OpCom8 || x != v_1.Args[0] {
+			break
+		}
+		v.reset(OpConst8)
+		v.AuxInt = int8ToAuxInt(1)
+		return true
+	}
+	// match: (Sub8 (Com8 x) (Neg8 x))
+	// result: (Const8 [-1])
+	for {
+		if v_0.Op != OpCom8 {
+			break
+		}
+		x := v_0.Args[0]
+		if v_1.Op != OpNeg8 || x != v_1.Args[0] {
+			break
+		}
+		v.reset(OpConst8)
+		v.AuxInt = int8ToAuxInt(-1)
+		return true
+	}
 	// match: (Sub8 (Add8 x y) x)
 	// result: y
 	for {
@@ -23031,6 +29567,42 @@ func rewriteValuegeneric_OpSub8(v *Value) bool {
 		}
 		break
 	}
+	// match: (Sub8 (Sub8 x y) x)
+	// result: (Neg8 y)
+	for {
+		if v_0.Op != OpSub8 {
+			break
+		}
+		y := v_0.Args[1]
+		x := v_0.Args[0]
+		if x != v_1 {
+			break
+		}
+		v.reset(OpNeg8)
+		v.AddArg(y)
+		return true
+	}
+	// match: (Sub8 x (Add8 x y))
+	// result: (Neg8 y)
+	for {
+		x := v_0
+		if v_1.Op != OpAdd8 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			if x != v_1_0 {
+				continue
+			}
+			y := v_1_1
+			v.reset(OpNeg8)
+			v.AddArg(y)
+			return true
+		}
+		break
+	}
 	// match: (Sub8 x (Sub8 i:(Const8 <t>) z))
 	// cond: (z.Op != OpConst8 && x.Op != OpConst8)
 	// result: (Sub8 (Add8 <t> x z) i)
@@ -23054,53 +29626,86 @@ func rewriteValuegeneric_OpSub8(v *Value) bool {
 		v.AddArg2(v0, i)
 		return true
 	}
-	// match: (Sub8 x (Sub8 z i:(Const8 <t>)))
+	// match: (Sub8 x (Add8 z i:(Const8 <t>)))
 	// cond: (z.Op != OpConst8 && x.Op != OpConst8)
-	// result: (Add8 i (Sub8 <t> x z))
+	// result: (Sub8 (Sub8 <t> x z) i)
 	for {
 		x := v_0
-		if v_1.Op != OpSub8 {
+		if v_1.Op != OpAdd8 {
 			break
 		}
 		_ = v_1.Args[1]
-		z := v_1.Args[0]
-		i := v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			z := v_1_0
+			i := v_1_1
+			if i.Op != OpConst8 {
+				continue
+			}
+			t := i.Type
+			if !(z.Op != OpConst8 && x.Op != OpConst8) {
+				continue
+			}
+			v.reset(OpSub8)
+			v0 := b.NewValue0(v.Pos, OpSub8, t)
+			v0.AddArg2(x, z)
+			v.AddArg2(v0, i)
+			return true
+		}
+		break
+	}
+	// match: (Sub8 (Sub8 i:(Const8 <t>) z) x)
+	// cond: (z.Op != OpConst8 && x.Op != OpConst8)
+	// result: (Sub8 i (Add8 <t> z x))
+	for {
+		if v_0.Op != OpSub8 {
+			break
+		}
+		z := v_0.Args[1]
+		i := v_0.Args[0]
 		if i.Op != OpConst8 {
 			break
 		}
 		t := i.Type
+		x := v_1
 		if !(z.Op != OpConst8 && x.Op != OpConst8) {
 			break
 		}
-		v.reset(OpAdd8)
-		v0 := b.NewValue0(v.Pos, OpSub8, t)
-		v0.AddArg2(x, z)
+		v.reset(OpSub8)
+		v0 := b.NewValue0(v.Pos, OpAdd8, t)
+		v0.AddArg2(z, x)
 		v.AddArg2(i, v0)
 		return true
 	}
-	// match: (Sub8 (Const8 <t> [c]) (Sub8 x (Const8 <t> [d])))
-	// result: (Sub8 (Const8 <t> [c+d]) x)
+	// match: (Sub8 (Add8 z i:(Const8 <t>)) x)
+	// cond: (z.Op != OpConst8 && x.Op != OpConst8)
+	// result: (Add8 i (Sub8 <t> z x))
 	for {
-		if v_0.Op != OpConst8 {
+		if v_0.Op != OpAdd8 {
 			break
 		}
-		t := v_0.Type
-		c := auxIntToInt8(v_0.AuxInt)
-		if v_1.Op != OpSub8 {
-			break
+		_ = v_0.Args[1]
+		v_0_0 := v_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_0, v_0_1 = _i0+1, v_0_1, v_0_0 {
+			z := v_0_0
+			i := v_0_1
+			if i.Op != OpConst8 {
+				continue
+			}
+			t := i.Type
+			x := v_1
+			if !(z.Op != OpConst8 && x.Op != OpConst8) {
+				continue
+			}
+			v.reset(OpAdd8)
+			v0 := b.NewValue0(v.Pos, OpSub8, t)
+			v0.AddArg2(z, x)
+			v.AddArg2(i, v0)
+			return true
 		}
-		_ = v_1.Args[1]
-		x := v_1.Args[0]
-		v_1_1 := v_1.Args[1]
-		if v_1_1.Op != OpConst8 || v_1_1.Type != t {
-			break
-		}
-		d := auxIntToInt8(v_1_1.AuxInt)
-		v.reset(OpSub8)
-		v0 := b.NewValue0(v.Pos, OpConst8, t)
-		v0.AuxInt = int8ToAuxInt(c + d)
-		v.AddArg2(v0, x)
-		return true
+		break
 	}
 	// match: (Sub8 (Const8 <t> [c]) (Sub8 (Const8 <t> [d]) x))
 	// result: (Add8 (Const8 <t> [c-d]) x)
@@ -23123,6 +29728,49 @@ func rewriteValuegeneric_OpSub8(v *Value) bool {
 		v0 := b.NewValue0(v.Pos, OpConst8, t)
 		v0.AuxInt = int8ToAuxInt(c - d)
 		v.AddArg2(v0, x)
+		return true
+	}
+	// match: (Sub8 (Const8 <t> [c]) (Add8 (Const8 <t> [d]) x))
+	// result: (Sub8 (Const8 <t> [c-d]) x)
+	for {
+		if v_0.Op != OpConst8 {
+			break
+		}
+		t := v_0.Type
+		c := auxIntToInt8(v_0.AuxInt)
+		if v_1.Op != OpAdd8 {
+			break
+		}
+		_ = v_1.Args[1]
+		v_1_0 := v_1.Args[0]
+		v_1_1 := v_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_1_0, v_1_1 = _i0+1, v_1_1, v_1_0 {
+			if v_1_0.Op != OpConst8 || v_1_0.Type != t {
+				continue
+			}
+			d := auxIntToInt8(v_1_0.AuxInt)
+			x := v_1_1
+			v.reset(OpSub8)
+			v0 := b.NewValue0(v.Pos, OpConst8, t)
+			v0.AuxInt = int8ToAuxInt(c - d)
+			v.AddArg2(v0, x)
+			return true
+		}
+		break
+	}
+	return false
+}
+func rewriteValuegeneric_OpTrunc(v *Value) bool {
+	v_0 := v.Args[0]
+	// match: (Trunc (Const64F [c]))
+	// result: (Const64F [math.Trunc(c)])
+	for {
+		if v_0.Op != OpConst64F {
+			break
+		}
+		c := auxIntToFloat64(v_0.AuxInt)
+		v.reset(OpConst64F)
+		v.AuxInt = float64ToAuxInt(math.Trunc(c))
 		return true
 	}
 	return false
@@ -23579,6 +30227,7 @@ func rewriteValuegeneric_OpXor16(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (Xor16 (Const16 [c]) (Const16 [d]))
 	// result: (Const16 [c^d])
 	for {
@@ -23617,6 +30266,37 @@ func rewriteValuegeneric_OpXor16(v *Value) bool {
 			}
 			x := v_1
 			v.copyOf(x)
+			return true
+		}
+		break
+	}
+	// match: (Xor16 (Com16 x) x)
+	// result: (Const16 [-1])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom16 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
+				continue
+			}
+			v.reset(OpConst16)
+			v.AuxInt = int16ToAuxInt(-1)
+			return true
+		}
+		break
+	}
+	// match: (Xor16 (Const16 [-1]) x)
+	// result: (Com16 x)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpConst16 || auxIntToInt16(v_0.AuxInt) != -1 {
+				continue
+			}
+			x := v_1
+			v.reset(OpCom16)
+			v.AddArg(x)
 			return true
 		}
 		break
@@ -23704,12 +30384,321 @@ func rewriteValuegeneric_OpXor16(v *Value) bool {
 		}
 		break
 	}
+	// match: (Xor16 (Lsh16x64 x z:(Const64 <t> [c])) (Rsh16Ux64 x (Const64 [d])))
+	// cond: c < 16 && d == 16-c && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpLsh16x64 {
+				continue
+			}
+			_ = v_0.Args[1]
+			x := v_0.Args[0]
+			z := v_0.Args[1]
+			if z.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(z.AuxInt)
+			if v_1.Op != OpRsh16Ux64 {
+				continue
+			}
+			_ = v_1.Args[1]
+			if x != v_1.Args[0] {
+				continue
+			}
+			v_1_1 := v_1.Args[1]
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			d := auxIntToInt64(v_1_1.AuxInt)
+			if !(c < 16 && d == 16-c && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor16 left:(Lsh16x64 x y) right:(Rsh16Ux64 x (Sub64 (Const64 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh16x64 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh16Ux64 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub64 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst64 || auxIntToInt64(right_1_0.AuxInt) != 16 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor16 left:(Lsh16x32 x y) right:(Rsh16Ux32 x (Sub32 (Const32 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh16x32 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh16Ux32 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub32 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst32 || auxIntToInt32(right_1_0.AuxInt) != 16 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor16 left:(Lsh16x16 x y) right:(Rsh16Ux16 x (Sub16 (Const16 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh16x16 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh16Ux16 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub16 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst16 || auxIntToInt16(right_1_0.AuxInt) != 16 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor16 left:(Lsh16x8 x y) right:(Rsh16Ux8 x (Sub8 (Const8 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh16x8 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh16Ux8 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub8 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst8 || auxIntToInt8(right_1_0.AuxInt) != 16 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor16 right:(Rsh16Ux64 x y) left:(Lsh16x64 x z:(Sub64 (Const64 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh16Ux64 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh16x64 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub64 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst64 || auxIntToInt64(z_0.AuxInt) != 16 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor16 right:(Rsh16Ux32 x y) left:(Lsh16x32 x z:(Sub32 (Const32 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh16Ux32 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh16x32 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub32 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst32 || auxIntToInt32(z_0.AuxInt) != 16 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor16 right:(Rsh16Ux16 x y) left:(Lsh16x16 x z:(Sub16 (Const16 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh16Ux16 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh16x16 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub16 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst16 || auxIntToInt16(z_0.AuxInt) != 16 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor16 right:(Rsh16Ux8 x y) left:(Lsh16x8 x z:(Sub8 (Const8 [16]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)
+	// result: (RotateLeft16 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh16Ux8 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh16x8 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub8 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst8 || auxIntToInt8(z_0.AuxInt) != 16 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 16)) {
+				continue
+			}
+			v.reset(OpRotateLeft16)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
 	return false
 }
 func rewriteValuegeneric_OpXor32(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (Xor32 (Const32 [c]) (Const32 [d]))
 	// result: (Const32 [c^d])
 	for {
@@ -23748,6 +30737,37 @@ func rewriteValuegeneric_OpXor32(v *Value) bool {
 			}
 			x := v_1
 			v.copyOf(x)
+			return true
+		}
+		break
+	}
+	// match: (Xor32 (Com32 x) x)
+	// result: (Const32 [-1])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom32 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
+				continue
+			}
+			v.reset(OpConst32)
+			v.AuxInt = int32ToAuxInt(-1)
+			return true
+		}
+		break
+	}
+	// match: (Xor32 (Const32 [-1]) x)
+	// result: (Com32 x)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpConst32 || auxIntToInt32(v_0.AuxInt) != -1 {
+				continue
+			}
+			x := v_1
+			v.reset(OpCom32)
+			v.AddArg(x)
 			return true
 		}
 		break
@@ -23835,12 +30855,321 @@ func rewriteValuegeneric_OpXor32(v *Value) bool {
 		}
 		break
 	}
+	// match: (Xor32 (Lsh32x64 x z:(Const64 <t> [c])) (Rsh32Ux64 x (Const64 [d])))
+	// cond: c < 32 && d == 32-c && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpLsh32x64 {
+				continue
+			}
+			_ = v_0.Args[1]
+			x := v_0.Args[0]
+			z := v_0.Args[1]
+			if z.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(z.AuxInt)
+			if v_1.Op != OpRsh32Ux64 {
+				continue
+			}
+			_ = v_1.Args[1]
+			if x != v_1.Args[0] {
+				continue
+			}
+			v_1_1 := v_1.Args[1]
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			d := auxIntToInt64(v_1_1.AuxInt)
+			if !(c < 32 && d == 32-c && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor32 left:(Lsh32x64 x y) right:(Rsh32Ux64 x (Sub64 (Const64 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh32x64 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh32Ux64 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub64 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst64 || auxIntToInt64(right_1_0.AuxInt) != 32 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor32 left:(Lsh32x32 x y) right:(Rsh32Ux32 x (Sub32 (Const32 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh32x32 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh32Ux32 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub32 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst32 || auxIntToInt32(right_1_0.AuxInt) != 32 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor32 left:(Lsh32x16 x y) right:(Rsh32Ux16 x (Sub16 (Const16 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh32x16 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh32Ux16 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub16 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst16 || auxIntToInt16(right_1_0.AuxInt) != 32 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor32 left:(Lsh32x8 x y) right:(Rsh32Ux8 x (Sub8 (Const8 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh32x8 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh32Ux8 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub8 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst8 || auxIntToInt8(right_1_0.AuxInt) != 32 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor32 right:(Rsh32Ux64 x y) left:(Lsh32x64 x z:(Sub64 (Const64 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh32Ux64 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh32x64 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub64 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst64 || auxIntToInt64(z_0.AuxInt) != 32 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor32 right:(Rsh32Ux32 x y) left:(Lsh32x32 x z:(Sub32 (Const32 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh32Ux32 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh32x32 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub32 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst32 || auxIntToInt32(z_0.AuxInt) != 32 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor32 right:(Rsh32Ux16 x y) left:(Lsh32x16 x z:(Sub16 (Const16 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh32Ux16 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh32x16 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub16 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst16 || auxIntToInt16(z_0.AuxInt) != 32 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor32 right:(Rsh32Ux8 x y) left:(Lsh32x8 x z:(Sub8 (Const8 [32]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)
+	// result: (RotateLeft32 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh32Ux8 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh32x8 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub8 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst8 || auxIntToInt8(z_0.AuxInt) != 32 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 32)) {
+				continue
+			}
+			v.reset(OpRotateLeft32)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
 	return false
 }
 func rewriteValuegeneric_OpXor64(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (Xor64 (Const64 [c]) (Const64 [d]))
 	// result: (Const64 [c^d])
 	for {
@@ -23879,6 +31208,37 @@ func rewriteValuegeneric_OpXor64(v *Value) bool {
 			}
 			x := v_1
 			v.copyOf(x)
+			return true
+		}
+		break
+	}
+	// match: (Xor64 (Com64 x) x)
+	// result: (Const64 [-1])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom64 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
+				continue
+			}
+			v.reset(OpConst64)
+			v.AuxInt = int64ToAuxInt(-1)
+			return true
+		}
+		break
+	}
+	// match: (Xor64 (Const64 [-1]) x)
+	// result: (Com64 x)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpConst64 || auxIntToInt64(v_0.AuxInt) != -1 {
+				continue
+			}
+			x := v_1
+			v.reset(OpCom64)
+			v.AddArg(x)
 			return true
 		}
 		break
@@ -23966,12 +31326,321 @@ func rewriteValuegeneric_OpXor64(v *Value) bool {
 		}
 		break
 	}
+	// match: (Xor64 (Lsh64x64 x z:(Const64 <t> [c])) (Rsh64Ux64 x (Const64 [d])))
+	// cond: c < 64 && d == 64-c && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpLsh64x64 {
+				continue
+			}
+			_ = v_0.Args[1]
+			x := v_0.Args[0]
+			z := v_0.Args[1]
+			if z.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(z.AuxInt)
+			if v_1.Op != OpRsh64Ux64 {
+				continue
+			}
+			_ = v_1.Args[1]
+			if x != v_1.Args[0] {
+				continue
+			}
+			v_1_1 := v_1.Args[1]
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			d := auxIntToInt64(v_1_1.AuxInt)
+			if !(c < 64 && d == 64-c && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor64 left:(Lsh64x64 x y) right:(Rsh64Ux64 x (Sub64 (Const64 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh64x64 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh64Ux64 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub64 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst64 || auxIntToInt64(right_1_0.AuxInt) != 64 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor64 left:(Lsh64x32 x y) right:(Rsh64Ux32 x (Sub32 (Const32 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh64x32 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh64Ux32 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub32 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst32 || auxIntToInt32(right_1_0.AuxInt) != 64 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor64 left:(Lsh64x16 x y) right:(Rsh64Ux16 x (Sub16 (Const16 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh64x16 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh64Ux16 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub16 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst16 || auxIntToInt16(right_1_0.AuxInt) != 64 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor64 left:(Lsh64x8 x y) right:(Rsh64Ux8 x (Sub8 (Const8 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh64x8 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh64Ux8 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub8 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst8 || auxIntToInt8(right_1_0.AuxInt) != 64 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor64 right:(Rsh64Ux64 x y) left:(Lsh64x64 x z:(Sub64 (Const64 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh64Ux64 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh64x64 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub64 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst64 || auxIntToInt64(z_0.AuxInt) != 64 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor64 right:(Rsh64Ux32 x y) left:(Lsh64x32 x z:(Sub32 (Const32 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh64Ux32 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh64x32 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub32 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst32 || auxIntToInt32(z_0.AuxInt) != 64 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor64 right:(Rsh64Ux16 x y) left:(Lsh64x16 x z:(Sub16 (Const16 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh64Ux16 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh64x16 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub16 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst16 || auxIntToInt16(z_0.AuxInt) != 64 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor64 right:(Rsh64Ux8 x y) left:(Lsh64x8 x z:(Sub8 (Const8 [64]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)
+	// result: (RotateLeft64 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh64Ux8 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh64x8 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub8 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst8 || auxIntToInt8(z_0.AuxInt) != 64 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 64)) {
+				continue
+			}
+			v.reset(OpRotateLeft64)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
 	return false
 }
 func rewriteValuegeneric_OpXor8(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (Xor8 (Const8 [c]) (Const8 [d]))
 	// result: (Const8 [c^d])
 	for {
@@ -24010,6 +31679,37 @@ func rewriteValuegeneric_OpXor8(v *Value) bool {
 			}
 			x := v_1
 			v.copyOf(x)
+			return true
+		}
+		break
+	}
+	// match: (Xor8 (Com8 x) x)
+	// result: (Const8 [-1])
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpCom8 {
+				continue
+			}
+			x := v_0.Args[0]
+			if x != v_1 {
+				continue
+			}
+			v.reset(OpConst8)
+			v.AuxInt = int8ToAuxInt(-1)
+			return true
+		}
+		break
+	}
+	// match: (Xor8 (Const8 [-1]) x)
+	// result: (Com8 x)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpConst8 || auxIntToInt8(v_0.AuxInt) != -1 {
+				continue
+			}
+			x := v_1
+			v.reset(OpCom8)
+			v.AddArg(x)
 			return true
 		}
 		break
@@ -24097,28 +31797,333 @@ func rewriteValuegeneric_OpXor8(v *Value) bool {
 		}
 		break
 	}
+	// match: (Xor8 (Lsh8x64 x z:(Const64 <t> [c])) (Rsh8Ux64 x (Const64 [d])))
+	// cond: c < 8 && d == 8-c && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			if v_0.Op != OpLsh8x64 {
+				continue
+			}
+			_ = v_0.Args[1]
+			x := v_0.Args[0]
+			z := v_0.Args[1]
+			if z.Op != OpConst64 {
+				continue
+			}
+			c := auxIntToInt64(z.AuxInt)
+			if v_1.Op != OpRsh8Ux64 {
+				continue
+			}
+			_ = v_1.Args[1]
+			if x != v_1.Args[0] {
+				continue
+			}
+			v_1_1 := v_1.Args[1]
+			if v_1_1.Op != OpConst64 {
+				continue
+			}
+			d := auxIntToInt64(v_1_1.AuxInt)
+			if !(c < 8 && d == 8-c && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor8 left:(Lsh8x64 x y) right:(Rsh8Ux64 x (Sub64 (Const64 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh8x64 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh8Ux64 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub64 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst64 || auxIntToInt64(right_1_0.AuxInt) != 8 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor8 left:(Lsh8x32 x y) right:(Rsh8Ux32 x (Sub32 (Const32 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh8x32 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh8Ux32 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub32 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst32 || auxIntToInt32(right_1_0.AuxInt) != 8 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor8 left:(Lsh8x16 x y) right:(Rsh8Ux16 x (Sub16 (Const16 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh8x16 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh8Ux16 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub16 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst16 || auxIntToInt16(right_1_0.AuxInt) != 8 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor8 left:(Lsh8x8 x y) right:(Rsh8Ux8 x (Sub8 (Const8 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x y)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			left := v_0
+			if left.Op != OpLsh8x8 {
+				continue
+			}
+			y := left.Args[1]
+			x := left.Args[0]
+			right := v_1
+			if right.Op != OpRsh8Ux8 {
+				continue
+			}
+			_ = right.Args[1]
+			if x != right.Args[0] {
+				continue
+			}
+			right_1 := right.Args[1]
+			if right_1.Op != OpSub8 {
+				continue
+			}
+			_ = right_1.Args[1]
+			right_1_0 := right_1.Args[0]
+			if right_1_0.Op != OpConst8 || auxIntToInt8(right_1_0.AuxInt) != 8 || y != right_1.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, y)
+			return true
+		}
+		break
+	}
+	// match: (Xor8 right:(Rsh8Ux64 x y) left:(Lsh8x64 x z:(Sub64 (Const64 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh8Ux64 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh8x64 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub64 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst64 || auxIntToInt64(z_0.AuxInt) != 8 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor8 right:(Rsh8Ux32 x y) left:(Lsh8x32 x z:(Sub32 (Const32 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh8Ux32 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh8x32 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub32 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst32 || auxIntToInt32(z_0.AuxInt) != 8 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor8 right:(Rsh8Ux16 x y) left:(Lsh8x16 x z:(Sub16 (Const16 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh8Ux16 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh8x16 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub16 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst16 || auxIntToInt16(z_0.AuxInt) != 8 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
+	// match: (Xor8 right:(Rsh8Ux8 x y) left:(Lsh8x8 x z:(Sub8 (Const8 [8]) y)))
+	// cond: (shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)
+	// result: (RotateLeft8 x z)
+	for {
+		for _i0 := 0; _i0 <= 1; _i0, v_0, v_1 = _i0+1, v_1, v_0 {
+			right := v_0
+			if right.Op != OpRsh8Ux8 {
+				continue
+			}
+			y := right.Args[1]
+			x := right.Args[0]
+			left := v_1
+			if left.Op != OpLsh8x8 {
+				continue
+			}
+			_ = left.Args[1]
+			if x != left.Args[0] {
+				continue
+			}
+			z := left.Args[1]
+			if z.Op != OpSub8 {
+				continue
+			}
+			_ = z.Args[1]
+			z_0 := z.Args[0]
+			if z_0.Op != OpConst8 || auxIntToInt8(z_0.AuxInt) != 8 || y != z.Args[1] || !((shiftIsBounded(left) || shiftIsBounded(right)) && canRotate(config, 8)) {
+				continue
+			}
+			v.reset(OpRotateLeft8)
+			v.AddArg2(x, z)
+			return true
+		}
+		break
+	}
 	return false
 }
 func rewriteValuegeneric_OpZero(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
 	b := v.Block
-	config := b.Func.Config
-	// match: (Zero (Load (OffPtr [c] (SP)) mem) mem)
-	// cond: mem.Op == OpStaticCall && isSameSym(mem.Aux, "runtime.newobject") && c == config.ctxt.FixedFrameSize() + config.RegSize
+	// match: (Zero (SelectN [0] call:(StaticLECall _ _)) mem:(SelectN [1] call))
+	// cond: isSameCall(call.Aux, "runtime.newobject")
 	// result: mem
 	for {
-		if v_0.Op != OpLoad {
+		if v_0.Op != OpSelectN || auxIntToInt64(v_0.AuxInt) != 0 {
 			break
 		}
-		mem := v_0.Args[1]
-		v_0_0 := v_0.Args[0]
-		if v_0_0.Op != OpOffPtr {
+		call := v_0.Args[0]
+		if call.Op != OpStaticLECall || len(call.Args) != 2 {
 			break
 		}
-		c := auxIntToInt64(v_0_0.AuxInt)
-		v_0_0_0 := v_0_0.Args[0]
-		if v_0_0_0.Op != OpSP || mem != v_1 || !(mem.Op == OpStaticCall && isSameSym(mem.Aux, "runtime.newobject") && c == config.ctxt.FixedFrameSize()+config.RegSize) {
+		mem := v_1
+		if mem.Op != OpSelectN || auxIntToInt64(mem.AuxInt) != 1 || call != mem.Args[0] || !(isSameCall(call.Aux, "runtime.newobject")) {
 			break
 		}
 		v.copyOf(mem)

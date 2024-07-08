@@ -5,10 +5,11 @@
 #include "go_asm.h"
 #include "go_tls.h"
 #include "textflag.h"
+#include "time_windows.h"
+#include "cgo/abi_amd64.h"
 
-// maxargs should be divisible by 2, as Windows stack
-// must be kept 16-byte aligned on syscall entry.
-#define maxargs 16
+// Offsets into Thread Environment Block (pointer in GS)
+#define TEB_TlsSlots 0x1480
 
 // void runtime·asmstdcall(void *c);
 TEXT runtime·asmstdcall(SB),NOSPLIT|NOFRAME,$0
@@ -22,14 +23,14 @@ TEXT runtime·asmstdcall(SB),NOSPLIT|NOFRAME,$0
 	MOVQ	0x30(GS), DI
 	MOVL	$0, 0x68(DI)
 
-	SUBQ	$(maxargs*8), SP	// room for args
+	SUBQ	$(const_maxArgs*8), SP	// room for args
 
 	// Fast version, do not store args on the stack.
 	CMPL	CX, $4
 	JLE	loadregs
 
 	// Check we have enough room for args.
-	CMPL	CX, $maxargs
+	CMPL	CX, $const_maxArgs
 	JLE	2(PC)
 	INT	$3			// not enough room -> crash
 
@@ -57,7 +58,7 @@ loadregs:
 	// Call stdcall function.
 	CALL	AX
 
-	ADDQ	$(maxargs*8), SP
+	ADDQ	$(const_maxArgs*8), SP
 
 	// Return result.
 	POPQ	CX
@@ -94,6 +95,8 @@ TEXT runtime·badsignal2(SB),NOSPLIT|NOFRAME,$48
 	MOVQ	runtime·_WriteFile(SB), AX
 	CALL	AX
 
+	// Does not return.
+	CALL	runtime·abort(SB)
 	RET
 
 // faster get/set last error
@@ -101,12 +104,6 @@ TEXT runtime·getlasterror(SB),NOSPLIT,$0
 	MOVQ	0x30(GS), AX
 	MOVL	0x68(AX), AX
 	MOVL	AX, ret+0(FP)
-	RET
-
-TEXT runtime·setlasterror(SB),NOSPLIT,$0
-	MOVL	err+0(FP), AX
-	MOVQ	0x30(GS),	CX
-	MOVL	AX, 0x68(CX)
 	RET
 
 // Called by Windows as a Vectored Exception Handler (VEH).
@@ -117,19 +114,12 @@ TEXT runtime·setlasterror(SB),NOSPLIT,$0
 TEXT sigtramp<>(SB),NOSPLIT|NOFRAME,$0-0
 	// CX: PEXCEPTION_POINTERS ExceptionInfo
 
-	// DI SI BP BX R12 R13 R14 R15 registers and DF flag are preserved
-	// as required by windows callback convention.
-	PUSHFQ
-	SUBQ	$112, SP
-	MOVQ	DI, 80(SP)
-	MOVQ	SI, 72(SP)
-	MOVQ	BP, 64(SP)
-	MOVQ	BX, 56(SP)
-	MOVQ	R12, 48(SP)
-	MOVQ	R13, 40(SP)
-	MOVQ	R14, 32(SP)
-	MOVQ	R15, 88(SP)
+	// Switch from the host ABI to the Go ABI.
+	PUSH_REGS_HOST_TO_ABI0()
+	// Make stack space for the rest of the function.
+	ADJSP	$48
 
+	MOVQ	CX, R13	// save exception address
 	MOVQ	AX, R15	// save handler address
 
 	// find g
@@ -144,8 +134,8 @@ TEXT sigtramp<>(SB),NOSPLIT|NOFRAME,$0-0
 	CALL	runtime·badsignal2(SB)
 
 	// save g and SP in case of stack switch
-	MOVQ	DX, 96(SP) // g
-	MOVQ	SP, 104(SP)
+	MOVQ	DX, 32(SP) // g
+	MOVQ	SP, 40(SP)
 
 	// do we need to switch to the g0 stack?
 	MOVQ	g_m(DX), BX
@@ -157,22 +147,18 @@ TEXT sigtramp<>(SB),NOSPLIT|NOFRAME,$0-0
 	get_tls(BP)
 	MOVQ	BX, g(BP)
 	MOVQ	(g_sched+gobuf_sp)(BX), DI
-	// make it look like mstart called us on g0, to stop traceback
-	SUBQ	$8, DI
-	MOVQ	$runtime·mstart(SB), SI
-	MOVQ	SI, 0(DI)
-	// traceback will think that we've done PUSHFQ and SUBQ
-	// on this stack, so subtract them here to match.
-	// (we need room for sighandler arguments anyway).
+	// make room for sighandler arguments
 	// and re-save old SP for restoring later.
-	SUBQ	$(112+8), DI
-	// save g, save old stack pointer.
-	MOVQ	SP, 104(DI)
+	// Adjust g0 stack by the space we're using and
+	// save SP at the same place on the g0 stack.
+	// The 40(DI) here must match the 40(SP) above.
+	SUBQ	$(REGS_HOST_TO_ABI0_STACK + 48), DI
+	MOVQ	SP, 40(DI)
 	MOVQ	DI, SP
 
 g0:
-	MOVQ	0(CX), BX // ExceptionRecord*
-	MOVQ	8(CX), CX // Context*
+	MOVQ	0(R13), BX // ExceptionRecord*
+	MOVQ	8(R13), CX // Context*
 	MOVQ	BX, 0(SP)
 	MOVQ	CX, 8(SP)
 	MOVQ	DX, 16(SP)
@@ -180,27 +166,62 @@ g0:
 	// AX is set to report result back to Windows
 	MOVL	24(SP), AX
 
+	MOVQ	SP, DI // save g0 SP
+
 	// switch back to original stack and g
 	// no-op if we never left.
-	MOVQ	104(SP), SP
-	MOVQ	96(SP), DX
+	MOVQ	40(SP), SP
+	MOVQ	32(SP), DX
 	get_tls(BP)
 	MOVQ	DX, g(BP)
 
+	// if return value is CONTINUE_SEARCH, do not set up control
+	// flow guard workaround.
+	CMPQ	AX, $0
+	JEQ	done
+
+	// Check if we need to set up the control flow guard workaround.
+	// On Windows, the stack pointer in the context must lie within
+	// system stack limits when we resume from exception.
+	// Store the resume SP and PC in alternate registers
+	// and return to sigresume on the g0 stack.
+	// sigresume makes no use of the stack at all,
+	// loading SP from R8 and jumping to R9.
+	// Note that smashing R8 and R9 is only safe because we know sigpanic
+	// will not actually return to the original frame, so the registers
+	// are effectively dead. But this does mean we can't use the
+	// same mechanism for async preemption.
+	MOVQ	8(R13), CX
+	MOVQ	$sigresume<>(SB), BX
+	CMPQ	BX, context_rip(CX)
+	JEQ	done			// do not clobber saved SP/PC
+
+	// Save resume SP and PC into R8, R9.
+	MOVQ	context_rsp(CX), BX
+	MOVQ	BX, context_r8(CX)
+	MOVQ	context_rip(CX), BX
+	MOVQ	BX, context_r9(CX)
+
+	// Set up context record to return to sigresume on g0 stack
+	MOVD	DI, BX
+	MOVD	BX, context_rsp(CX)
+	MOVD	$sigresume<>(SB), BX
+	MOVD	BX, context_rip(CX)
+
 done:
-	// restore registers as required for windows callback
-	MOVQ	88(SP), R15
-	MOVQ	32(SP), R14
-	MOVQ	40(SP), R13
-	MOVQ	48(SP), R12
-	MOVQ	56(SP), BX
-	MOVQ	64(SP), BP
-	MOVQ	72(SP), SI
-	MOVQ	80(SP), DI
-	ADDQ	$112, SP
-	POPFQ
+	ADJSP	$-48
+	POP_REGS_HOST_TO_ABI0()
 
 	RET
+
+// Trampoline to resume execution from exception handler.
+// This is part of the control flow guard workaround.
+// It switches stacks and jumps to the continuation address.
+// R8 and R9 are set above at the end of sigtramp<>
+// in the context that starts executing at sigresume<>.
+TEXT sigresume<>(SB),NOSPLIT|NOFRAME,$0
+	MOVQ	R8, SP
+	JMP	R9
 
 TEXT runtime·exceptiontramp(SB),NOSPLIT|NOFRAME,$0
 	MOVQ	$runtime·exceptionhandler(SB), AX
@@ -213,70 +234,6 @@ TEXT runtime·firstcontinuetramp(SB),NOSPLIT|NOFRAME,$0-0
 TEXT runtime·lastcontinuetramp(SB),NOSPLIT|NOFRAME,$0-0
 	MOVQ	$runtime·lastcontinuehandler(SB), AX
 	JMP	sigtramp<>(SB)
-
-TEXT runtime·ctrlhandler(SB),NOSPLIT|NOFRAME,$8
-	MOVQ	CX, 16(SP)		// spill
-	MOVQ	$runtime·ctrlhandler1(SB), CX
-	MOVQ	CX, 0(SP)
-	CALL	runtime·externalthreadhandler(SB)
-	RET
-
-TEXT runtime·profileloop(SB),NOSPLIT|NOFRAME,$8
-	MOVQ	$runtime·profileloop1(SB), CX
-	MOVQ	CX, 0(SP)
-	CALL	runtime·externalthreadhandler(SB)
-	RET
-
-TEXT runtime·externalthreadhandler(SB),NOSPLIT|NOFRAME,$0
-	PUSHQ	BP
-	MOVQ	SP, BP
-	PUSHQ	BX
-	PUSHQ	SI
-	PUSHQ	DI
-	PUSHQ	0x28(GS)
-	MOVQ	SP, DX
-
-	// setup dummy m, g
-	SUBQ	$m__size, SP		// space for M
-	MOVQ	SP, 0(SP)
-	MOVQ	$m__size, 8(SP)
-	CALL	runtime·memclrNoHeapPointers(SB)	// smashes AX,BX,CX, maybe BP
-
-	LEAQ	m_tls(SP), CX
-	MOVQ	CX, 0x28(GS)
-	MOVQ	SP, BX
-	SUBQ	$g__size, SP		// space for G
-	MOVQ	SP, g(CX)
-	MOVQ	SP, m_g0(BX)
-
-	MOVQ	SP, 0(SP)
-	MOVQ	$g__size, 8(SP)
-	CALL	runtime·memclrNoHeapPointers(SB)	// smashes AX,BX,CX, maybe BP
-	LEAQ	g__size(SP), BX
-	MOVQ	BX, g_m(SP)
-
-	LEAQ	-32768(SP), CX		// must be less than SizeOfStackReserve set by linker
-	MOVQ	CX, (g_stack+stack_lo)(SP)
-	ADDQ	$const__StackGuard, CX
-	MOVQ	CX, g_stackguard0(SP)
-	MOVQ	CX, g_stackguard1(SP)
-	MOVQ	DX, (g_stack+stack_hi)(SP)
-
-	PUSHQ	AX			// room for return value
-	PUSHQ	32(BP)			// arg for handler
-	CALL	16(BP)
-	POPQ	CX
-	POPQ	AX			// pass return value to Windows in AX
-
-	get_tls(CX)
-	MOVQ	g(CX), CX
-	MOVQ	(g_stack+stack_hi)(CX), SP
-	POPQ	0x28(GS)
-	POPQ	DI
-	POPQ	SI
-	POPQ	BX
-	POPQ	BP
-	RET
 
 GLOBL runtime·cbctxts(SB), NOPTR, $8
 
@@ -291,76 +248,51 @@ TEXT runtime·callbackasm1(SB),NOSPLIT,$0
   	MOVQ	DX, (16+8)(SP)
   	MOVQ	R8, (16+16)(SP)
   	MOVQ	R9, (16+24)(SP)
+	// R8 = address of args vector
+	LEAQ	(16+0)(SP), R8
 
-	// remove return address from stack, we are not returning there
+	// remove return address from stack, we are not returning to callbackasm, but to its caller.
   	MOVQ	0(SP), AX
 	ADDQ	$8, SP
 
-	// determine index into runtime·cbctxts table
+	// determine index into runtime·cbs table
 	MOVQ	$runtime·callbackasm(SB), DX
 	SUBQ	DX, AX
 	MOVQ	$0, DX
 	MOVQ	$5, CX	// divide by 5 because each call instruction in runtime·callbacks is 5 bytes long
 	DIVL	CX
+	SUBQ	$1, AX	// subtract 1 because return PC is to the next slot
 
-	// find correspondent runtime·cbctxts table entry
-	MOVQ	runtime·cbctxts(SB), CX
-	MOVQ	-8(CX)(AX*8), AX
+	// Switch from the host ABI to the Go ABI.
+	PUSH_REGS_HOST_TO_ABI0()
 
-	// extract callback context
-	MOVQ	wincallbackcontext_argsize(AX), DX
-	MOVQ	wincallbackcontext_gobody(AX), AX
+	// Create a struct callbackArgs on our stack to be passed as
+	// the "frame" to cgocallback and on to callbackWrap.
+	SUBQ	$(24+callbackArgs__size), SP
+	MOVQ	AX, (24+callbackArgs_index)(SP) 	// callback index
+	MOVQ	R8, (24+callbackArgs_args)(SP)  	// address of args vector
+	MOVQ	$0, (24+callbackArgs_result)(SP)	// result
+	LEAQ	24(SP), AX
+	// Call cgocallback, which will call callbackWrap(frame).
+	MOVQ	$0, 16(SP)	// context
+	MOVQ	AX, 8(SP)	// frame (address of callbackArgs)
+	LEAQ	·callbackWrap<ABIInternal>(SB), BX	// cgocallback takes an ABIInternal entry-point
+	MOVQ	BX, 0(SP)	// PC of function value to call (callbackWrap)
+	CALL	·cgocallback(SB)
+	// Get callback result.
+	MOVQ	(24+callbackArgs_result)(SP), AX
+	ADDQ	$(24+callbackArgs__size), SP
 
-	// preserve whatever's at the memory location that
-	// the callback will use to store the return value
-	LEAQ	8(SP), CX       // args vector, skip return address
-	PUSHQ	0(CX)(DX*1)     // store 8 bytes from just after the args array
-	ADDQ	$8, DX          // extend argsize by size of return value
+	POP_REGS_HOST_TO_ABI0()
 
-	// DI SI BP BX R12 R13 R14 R15 registers and DF flag are preserved
-	// as required by windows callback convention.
-	PUSHFQ
-	SUBQ	$64, SP
-	MOVQ	DI, 56(SP)
-	MOVQ	SI, 48(SP)
-	MOVQ	BP, 40(SP)
-	MOVQ	BX, 32(SP)
-	MOVQ	R12, 24(SP)
-	MOVQ	R13, 16(SP)
-	MOVQ	R14, 8(SP)
-	MOVQ	R15, 0(SP)
-
-	// prepare call stack.  use SUBQ to hide from stack frame checks
-	// cgocallback(Go func, void *frame, uintptr framesize)
-	SUBQ	$24, SP
-	MOVQ	DX, 16(SP)	// argsize (including return value)
-	MOVQ	CX, 8(SP)	// callback parameters
-	MOVQ	AX, 0(SP)	// address of target Go function
-	CLD
-	CALL	runtime·cgocallback_gofunc(SB)
-	MOVQ	0(SP), AX
-	MOVQ	8(SP), CX
-	MOVQ	16(SP), DX
-	ADDQ	$24, SP
-
-	// restore registers as required for windows callback
-	MOVQ	0(SP), R15
-	MOVQ	8(SP), R14
-	MOVQ	16(SP), R13
-	MOVQ	24(SP), R12
-	MOVQ	32(SP), BX
-	MOVQ	40(SP), BP
-	MOVQ	48(SP), SI
-	MOVQ	56(SP), DI
-	ADDQ	$64, SP
-	POPFQ
-
-	MOVQ	-8(CX)(DX*1), AX  // return value
-	POPQ	-8(CX)(DX*1)      // restore bytes just after the args
+	// The return value was placed in AX above.
 	RET
 
 // uint32 tstart_stdcall(M *newm);
 TEXT runtime·tstart_stdcall(SB),NOSPLIT,$0
+	// Switch from the host ABI to the Go ABI.
+	PUSH_REGS_HOST_TO_ABI0()
+
 	// CX contains first arg newm
 	MOVQ	m_g0(CX), DX		// g
 
@@ -374,80 +306,35 @@ TEXT runtime·tstart_stdcall(SB),NOSPLIT,$0
 	MOVQ	AX, g_stackguard1(DX)
 
 	// Set up tls.
-	LEAQ	m_tls(CX), SI
-	MOVQ	SI, 0x28(GS)
+	LEAQ	m_tls(CX), DI
 	MOVQ	CX, g_m(DX)
-	MOVQ	DX, g(SI)
-
-	// Someday the convention will be D is always cleared.
-	CLD
+	MOVQ	DX, g(DI)
+	CALL	runtime·settls(SB) // clobbers CX
 
 	CALL	runtime·stackcheck(SB)	// clobbers AX,CX
 	CALL	runtime·mstart(SB)
+
+	POP_REGS_HOST_TO_ABI0()
 
 	XORL	AX, AX			// return 0 == success
 	RET
 
 // set tls base to DI
 TEXT runtime·settls(SB),NOSPLIT,$0
-	MOVQ	DI, 0x28(GS)
+	MOVQ	runtime·tls_g(SB), CX
+	MOVQ	DI, 0(CX)(GS)
 	RET
 
-// func onosstack(fn unsafe.Pointer, arg uint32)
-TEXT runtime·onosstack(SB),NOSPLIT,$0
-	MOVQ	fn+0(FP), AX		// to hide from 6l
-	MOVL	arg+8(FP), BX
-
-	// Execute call on m->g0 stack, in case we are not actually
-	// calling a system call wrapper, like when running under WINE.
-	get_tls(R15)
-	CMPQ	R15, $0
-	JNE	3(PC)
-	// Not a Go-managed thread. Do not switch stack.
-	CALL	AX
-	RET
-
-	MOVQ	g(R15), R13
-	MOVQ	g_m(R13), R13
-
-	// leave pc/sp for cpu profiler
-	MOVQ	(SP), R12
-	MOVQ	R12, m_libcallpc(R13)
-	MOVQ	g(R15), R12
-	MOVQ	R12, m_libcallg(R13)
-	// sp must be the last, because once async cpu profiler finds
-	// all three values to be non-zero, it will use them
-	LEAQ	fn+0(FP), R12
-	MOVQ	R12, m_libcallsp(R13)
-
-	MOVQ	m_g0(R13), R14
-	CMPQ	g(R15), R14
-	JNE	switch
-	// executing on m->g0 already
-	CALL	AX
-	JMP	ret
-
-switch:
-	// Switch to m->g0 stack and back.
-	MOVQ	(g_sched+gobuf_sp)(R14), R14
-	MOVQ	SP, -8(R14)
-	LEAQ	-8(R14), SP
-	CALL	AX
-	MOVQ	0(SP), SP
-
-ret:
-	MOVQ	$0, m_libcallsp(R13)
-	RET
-
-// Runs on OS stack. duration (in 100ns units) is in BX.
+// Runs on OS stack.
+// duration (in -100ns units) is in dt+0(FP).
+// g may be nil.
 // The function leaves room for 4 syscall parameters
 // (as per windows amd64 calling convention).
-TEXT runtime·usleep2(SB),NOSPLIT|NOFRAME,$48
+TEXT runtime·usleep2(SB),NOSPLIT|NOFRAME,$48-4
+	MOVLQSX	dt+0(FP), BX
 	MOVQ	SP, AX
 	ANDQ	$~15, SP	// alignment as per Windows requirement
 	MOVQ	AX, 40(SP)
-	// Want negative 100ns units.
-	NEGQ	BX
 	LEAQ	32(SP), R8  // ptime
 	MOVQ	BX, (R8)
 	MOVQ	$-1, CX // handle
@@ -455,6 +342,39 @@ TEXT runtime·usleep2(SB),NOSPLIT|NOFRAME,$48
 	MOVQ	runtime·_NtWaitForSingleObject(SB), AX
 	CALL	AX
 	MOVQ	40(SP), SP
+	RET
+
+// Runs on OS stack. duration (in -100ns units) is in dt+0(FP).
+// g is valid.
+TEXT runtime·usleep2HighRes(SB),NOSPLIT|NOFRAME,$72-4
+	MOVLQSX	dt+0(FP), BX
+	get_tls(CX)
+
+	MOVQ	SP, AX
+	ANDQ	$~15, SP	// alignment as per Windows requirement
+	MOVQ	AX, 64(SP)
+
+	MOVQ	g(CX), CX
+	MOVQ	g_m(CX), CX
+	MOVQ	(m_mOS+mOS_highResTimer)(CX), CX	// hTimer
+	MOVQ	CX, 48(SP)				// save hTimer for later
+	LEAQ	56(SP), DX				// lpDueTime
+	MOVQ	BX, (DX)
+	MOVQ	$0, R8					// lPeriod
+	MOVQ	$0, R9					// pfnCompletionRoutine
+	MOVQ	$0, AX
+	MOVQ	AX, 32(SP)				// lpArgToCompletionRoutine
+	MOVQ	AX, 40(SP)				// fResume
+	MOVQ	runtime·_SetWaitableTimer(SB), AX
+	CALL	AX
+
+	MOVQ	48(SP), CX				// handle
+	MOVQ	$0, DX					// alertable
+	MOVQ	$0, R8					// ptime
+	MOVQ	runtime·_NtWaitForSingleObject(SB), AX
+	CALL	AX
+
+	MOVQ	64(SP), SP
 	RET
 
 // Runs on OS stack.
@@ -469,75 +389,51 @@ TEXT runtime·switchtothread(SB),NOSPLIT|NOFRAME,$0
 	MOVQ	32(SP), SP
 	RET
 
-// See https://www.dcl.hpi.uni-potsdam.de/research/WRK/2007/08/getting-os-information-the-kuser_shared_data-structure/
-// Must read hi1, then lo, then hi2. The snapshot is valid if hi1 == hi2.
-#define _INTERRUPT_TIME 0x7ffe0008
-#define _SYSTEM_TIME 0x7ffe0014
-#define time_lo 0
-#define time_hi1 4
-#define time_hi2 8
-
 TEXT runtime·nanotime1(SB),NOSPLIT,$0-8
 	CMPB	runtime·useQPCTime(SB), $0
 	JNE	useQPC
 	MOVQ	$_INTERRUPT_TIME, DI
-loop:
-	MOVL	time_hi1(DI), AX
-	MOVL	time_lo(DI), BX
-	MOVL	time_hi2(DI), CX
-	CMPL	AX, CX
-	JNE	loop
-	SHLQ	$32, CX
-	ORQ	BX, CX
-	IMULQ	$100, CX
-	MOVQ	CX, ret+0(FP)
+	MOVQ	time_lo(DI), AX
+	IMULQ	$100, AX
+	MOVQ	AX, ret+0(FP)
 	RET
 useQPC:
 	JMP	runtime·nanotimeQPC(SB)
 	RET
 
-TEXT time·now(SB),NOSPLIT,$0-24
-	CMPB	runtime·useQPCTime(SB), $0
-	JNE	useQPC
-	MOVQ	$_INTERRUPT_TIME, DI
-loop:
-	MOVL	time_hi1(DI), AX
-	MOVL	time_lo(DI), BX
-	MOVL	time_hi2(DI), CX
-	CMPL	AX, CX
-	JNE	loop
-	SHLQ	$32, AX
-	ORQ	BX, AX
-	IMULQ	$100, AX
-	MOVQ	AX, mono+16(FP)
-
-	MOVQ	$_SYSTEM_TIME, DI
-wall:
-	MOVL	time_hi1(DI), AX
-	MOVL	time_lo(DI), BX
-	MOVL	time_hi2(DI), CX
-	CMPL	AX, CX
-	JNE	wall
-	SHLQ	$32, AX
-	ORQ	BX, AX
-	MOVQ	$116444736000000000, DI
-	SUBQ	DI, AX
-	IMULQ	$100, AX
-
-	// generated code for
-	//	func f(x uint64) (uint64, uint64) { return x/1000000000, x%100000000 }
-	// adapted to reduce duplication
-	MOVQ	AX, CX
-	MOVQ	$1360296554856532783, AX
-	MULQ	CX
-	ADDQ	CX, DX
-	RCRQ	$1, DX
-	SHRQ	$29, DX
-	MOVQ	DX, sec+0(FP)
-	IMULQ	$1000000000, DX
-	SUBQ	DX, CX
-	MOVL	CX, nsec+8(FP)
+// func osSetupTLS(mp *m)
+// Setup TLS. for use by needm on Windows.
+TEXT runtime·osSetupTLS(SB),NOSPLIT,$0-8
+	MOVQ	mp+0(FP), AX
+	LEAQ	m_tls(AX), DI
+	CALL	runtime·settls(SB)
 	RET
-useQPC:
-	JMP	runtime·nowQPC(SB)
+
+// This is called from rt0_go, which runs on the system stack
+// using the initial stack allocated by the OS.
+TEXT runtime·wintls(SB),NOSPLIT|NOFRAME,$0
+	// Allocate a TLS slot to hold g across calls to external code
+	MOVQ	SP, AX
+	ANDQ	$~15, SP	// alignment as per Windows requirement
+	SUBQ	$48, SP	// room for SP and 4 args as per Windows requirement
+			// plus one extra word to keep stack 16 bytes aligned
+	MOVQ	AX, 32(SP)
+	MOVQ	runtime·_TlsAlloc(SB), AX
+	CALL	AX
+	MOVQ	32(SP), SP
+
+	MOVQ	AX, CX	// TLS index
+
+	// Assert that slot is less than 64 so we can use _TEB->TlsSlots
+	CMPQ	CX, $64
+	JB	ok
+	CALL	runtime·abort(SB)
+ok:
+	// Convert the TLS index at CX into
+	// an offset from TEB_TlsSlots.
+	SHLQ	$3, CX
+
+	// Save offset from TLS into tls_g.
+	ADDQ	$TEB_TlsSlots, CX
+	MOVQ	CX, runtime·tls_g(SB)
 	RET

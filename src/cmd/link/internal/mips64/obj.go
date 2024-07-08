@@ -34,12 +34,15 @@ import (
 	"cmd/internal/objabi"
 	"cmd/internal/sys"
 	"cmd/link/internal/ld"
+	"internal/buildcfg"
 )
 
 func Init() (*sys.Arch, ld.Arch) {
 	arch := sys.ArchMIPS64
-	if objabi.GOARCH == "mips64le" {
+	musl := "/lib/ld-musl-mips64.so.1"
+	if buildcfg.GOARCH == "mips64le" {
 		arch = sys.ArchMIPS64LE
+		musl = "/lib/ld-musl-mips64el.so.1"
 	}
 
 	theArch := ld.Arch{
@@ -48,20 +51,20 @@ func Init() (*sys.Arch, ld.Arch) {
 		Minalign:         minAlign,
 		Dwarfregsp:       dwarfRegSP,
 		Dwarfreglr:       dwarfRegLR,
-		Adddynrel:        adddynrel,
 		Archinit:         archinit,
 		Archreloc:        archreloc,
 		Archrelocvariant: archrelocvariant,
-		Asmb:             asmb,
-		Asmb2:            asmb2,
+		Extreloc:         extreloc,
 		Elfreloc1:        elfreloc1,
+		ElfrelocSize:     24,
 		Elfsetupplt:      elfsetupplt,
-		Gentext2:         gentext2,
+		Gentext:          gentext,
 		Machoreloc1:      machoreloc1,
 
 		Linuxdynld:     "/lib64/ld64.so.1",
+		LinuxdynldMusl: musl,
 		Freebsddynld:   "XXX",
-		Openbsddynld:   "XXX",
+		Openbsddynld:   "/usr/libexec/ld.so",
 		Netbsddynld:    "XXX",
 		Dragonflydynld: "XXX",
 		Solarisdynld:   "XXX",
@@ -85,7 +88,8 @@ func archinit(ctxt *ld.Link) {
 			*ld.FlagRound = 16 * 1024
 		}
 
-	case objabi.Hlinux: /* mips64 elf */
+	case objabi.Hlinux, /* mips64 elf */
+		objabi.Hopenbsd:
 		ld.Elfinit(ctxt)
 		ld.HEADR = ld.ELFRESERVE
 		if *ld.FlagTextAddr == -1 {

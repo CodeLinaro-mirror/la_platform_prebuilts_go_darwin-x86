@@ -36,13 +36,13 @@ import (
 	"cmd/internal/sys"
 	"encoding/binary"
 	"fmt"
+	"internal/buildcfg"
 	"log"
 	"strings"
 )
 
 var (
 	plan9privates *obj.LSym
-	deferreturn   *obj.LSym
 )
 
 // Instruction layout.
@@ -59,7 +59,6 @@ var (
 // is very slight but negative, so the alignment is disabled by
 // setting MaxLoopPad = 0. The code is here for reference and
 // for future experiments.
-//
 const (
 	loopAlign  = 16
 	maxLoopPad = 0
@@ -873,9 +872,9 @@ var ysha1rnds4 = []ytab{
 // up in instinit.  For example, oclass distinguishes the constants 0 and 1
 // from the more general 8-bit constants, but instinit says
 //
-//        ycover[Yi0*Ymax+Ys32] = 1
-//        ycover[Yi1*Ymax+Ys32] = 1
-//        ycover[Yi8*Ymax+Ys32] = 1
+//	ycover[Yi0*Ymax+Ys32] = 1
+//	ycover[Yi1*Ymax+Ys32] = 1
+//	ycover[Yi8*Ymax+Ys32] = 1
 //
 // which means that Yi0, Yi1, and Yi8 all count as Ys32 (signed 32)
 // if that's what an instruction can handle.
@@ -889,26 +888,28 @@ var ysha1rnds4 = []ytab{
 // is, the Ztype) and the z bytes.
 //
 // For example, let's look at AADDL.  The optab line says:
-//        {AADDL, yaddl, Px, opBytes{0x83, 00, 0x05, 0x81, 00, 0x01, 0x03}},
+//
+//	{AADDL, yaddl, Px, opBytes{0x83, 00, 0x05, 0x81, 00, 0x01, 0x03}},
 //
 // and yaddl says
-//        var yaddl = []ytab{
-//                {Yi8, Ynone, Yml, Zibo_m, 2},
-//                {Yi32, Ynone, Yax, Zil_, 1},
-//                {Yi32, Ynone, Yml, Zilo_m, 2},
-//                {Yrl, Ynone, Yml, Zr_m, 1},
-//                {Yml, Ynone, Yrl, Zm_r, 1},
-//        }
+//
+//	var yaddl = []ytab{
+//	        {Yi8, Ynone, Yml, Zibo_m, 2},
+//	        {Yi32, Ynone, Yax, Zil_, 1},
+//	        {Yi32, Ynone, Yml, Zilo_m, 2},
+//	        {Yrl, Ynone, Yml, Zr_m, 1},
+//	        {Yml, Ynone, Yrl, Zm_r, 1},
+//	}
 //
 // so there are 5 possible types of ADDL instruction that can be laid down, and
 // possible states used to lay them down (Ztype and z pointer, assuming z
 // points at opBytes{0x83, 00, 0x05,0x81, 00, 0x01, 0x03}) are:
 //
-//        Yi8, Yml -> Zibo_m, z (0x83, 00)
-//        Yi32, Yax -> Zil_, z+2 (0x05)
-//        Yi32, Yml -> Zilo_m, z+2+1 (0x81, 0x00)
-//        Yrl, Yml -> Zr_m, z+2+1+2 (0x01)
-//        Yml, Yrl -> Zm_r, z+2+1+2+1 (0x03)
+//	Yi8, Yml -> Zibo_m, z (0x83, 00)
+//	Yi32, Yax -> Zil_, z+2 (0x05)
+//	Yi32, Yml -> Zilo_m, z+2+1 (0x81, 0x00)
+//	Yrl, Yml -> Zr_m, z+2+1+2 (0x01)
+//	Yml, Yrl -> Zm_r, z+2+1+2+1 (0x03)
 //
 // The Pconstant in the optab line controls the prefix bytes to emit.  That's
 // relatively straightforward as this program goes.
@@ -918,7 +919,7 @@ var ysha1rnds4 = []ytab{
 // encoded addressing mode for the Yml arg), and then a single immediate byte.
 // Zilo_m is the same but a long (32-bit) immediate.
 var optab =
-//	as, ytab, andproto, opcode
+// as, ytab, andproto, opcode
 [...]Optab{
 	{obj.AXXX, nil, 0, opBytes{}},
 	{AAAA, ynone, P32, opBytes{0x37}},
@@ -1735,9 +1736,9 @@ var optab =
 	{ASTRL, yincq, Px, opBytes{0x0f, 0x00, 01}},
 	{ASTRQ, yincq, Pw, opBytes{0x0f, 0x00, 01}},
 	{AXSETBV, ynone, Pm, opBytes{0x01, 0xd1, 0}},
-	{AMOVBEWW, ymovbe, Pq, opBytes{0x38, 0xf0, 0, 0x38, 0xf1, 0}},
-	{AMOVBELL, ymovbe, Pm, opBytes{0x38, 0xf0, 0, 0x38, 0xf1, 0}},
-	{AMOVBEQQ, ymovbe, Pw, opBytes{0x0f, 0x38, 0xf0, 0, 0x0f, 0x38, 0xf1, 0}},
+	{AMOVBEW, ymovbe, Pq, opBytes{0x38, 0xf0, 0, 0x38, 0xf1, 0}},
+	{AMOVBEL, ymovbe, Pm, opBytes{0x38, 0xf0, 0, 0x38, 0xf1, 0}},
+	{AMOVBEQ, ymovbe, Pw, opBytes{0x0f, 0x38, 0xf0, 0, 0x0f, 0x38, 0xf1, 0}},
 	{ANOPW, ydivl, Pe, opBytes{0x0f, 0x1f, 00}},
 	{ANOPL, ydivl, Px, opBytes{0x0f, 0x1f, 00}},
 	{ASLDTW, yincq, Pe, opBytes{0x0f, 0x00, 00}},
@@ -1851,11 +1852,11 @@ func spadjop(ctxt *obj.Link, l, q obj.As) obj.As {
 	return q
 }
 
-// If the environment variable GOAMD64=alignedjumps the assembler will ensure that
-// no standalone or macro-fused jump will straddle or end on a 32 byte boundary
-// by inserting NOPs before the jumps
+// isJump returns whether p is a jump instruction.
+// It is used to ensure that no standalone or macro-fused jump will straddle
+// or end on a 32 byte boundary by inserting NOPs before the jumps.
 func isJump(p *obj.Prog) bool {
-	return p.Pcond != nil || p.As == obj.AJMP || p.As == obj.ACALL ||
+	return p.To.Target() != nil || p.As == obj.AJMP || p.As == obj.ACALL ||
 		p.As == obj.ARET || p.As == obj.ADUFFCOPY || p.As == obj.ADUFFZERO
 }
 
@@ -1867,7 +1868,7 @@ func lookForJCC(p *obj.Prog) *obj.Prog {
 	for q = p.Link; q != nil && (q.As == obj.APCDATA || q.As == obj.AFUNCDATA || q.As == obj.ANOP); q = q.Link {
 	}
 
-	if q == nil || q.Pcond == nil || p.As == obj.AJMP || p.As == obj.ACALL {
+	if q == nil || q.To.Target() == nil || p.As == obj.AJMP || p.As == obj.ACALL {
 		return nil
 	}
 
@@ -1887,7 +1888,7 @@ func lookForJCC(p *obj.Prog) *obj.Prog {
 func fusedJump(p *obj.Prog) (bool, uint8) {
 	var fusedSize uint8
 
-	// The first instruction in a macro fused pair may be preceeded by the LOCK prefix,
+	// The first instruction in a macro fused pair may be preceded by the LOCK prefix,
 	// or possibly an XACQUIRE/XRELEASE prefix followed by a LOCK prefix. If it is, we
 	// need to be careful to insert any padding before the locks rather than directly after them.
 
@@ -1987,11 +1988,6 @@ func makePjcCtx(ctxt *obj.Link) padJumpsCtx {
 		return padJumpsCtx(0)
 	}
 
-	if objabi.GOAMD64 != "alignedjumps" {
-		return padJumpsCtx(0)
-
-	}
-
 	return padJumpsCtx(32)
 }
 
@@ -2040,6 +2036,11 @@ type nopPad struct {
 }
 
 func span6(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
+	if ctxt.Retpoline && ctxt.Arch.Family == sys.I386 {
+		ctxt.Diag("-spectre=ret not supported on 386")
+		ctxt.Retpoline = false // don't keep printing
+	}
+
 	pjc := makePjcCtx(ctxt)
 
 	if s.P != nil {
@@ -2050,9 +2051,9 @@ func span6(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		ctxt.Diag("x86 tables not initialized, call x86.instinit first")
 	}
 
-	for p := s.Func.Text; p != nil; p = p.Link {
-		if p.To.Type == obj.TYPE_BRANCH && p.Pcond == nil {
-			p.Pcond = p
+	for p := s.Func().Text; p != nil; p = p.Link {
+		if p.To.Type == obj.TYPE_BRANCH && p.To.Target() == nil {
+			p.To.SetTarget(p)
 		}
 		if p.As == AADJSP {
 			p.To.Type = obj.TYPE_REG
@@ -2085,10 +2086,10 @@ func span6(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 	}
 
 	var count int64 // rough count of number of instructions
-	for p := s.Func.Text; p != nil; p = p.Link {
+	for p := s.Func().Text; p != nil; p = p.Link {
 		count++
 		p.Back = branchShort // use short branches first time through
-		if q := p.Pcond; q != nil && (q.Back&branchShort != 0) {
+		if q := p.To.Target(); q != nil && (q.Back&branchShort != 0) {
 			p.Back |= branchBackwards
 			q.Back |= branchLoopHead
 		}
@@ -2100,19 +2101,20 @@ func span6(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 	var c int32
 	errors := ctxt.Errors
 	var nops []nopPad // Padding for a particular assembly (reuse slice storage if multiple assemblies)
+	nrelocs0 := len(s.R)
 	for {
 		// This loop continues while there are reasons to re-assemble
 		// whole block, like the presence of long forward jumps.
 		reAssemble := false
-		for i := range s.R {
-			s.R[i] = obj.Reloc{}
+		for i := range s.R[nrelocs0:] {
+			s.R[nrelocs0+i] = obj.Reloc{}
 		}
-		s.R = s.R[:0]
+		s.R = s.R[:nrelocs0] // preserve marker relocations generated by the compiler
 		s.P = s.P[:0]
 		c = 0
 		var pPrev *obj.Prog
 		nops = nops[:0]
-		for p := s.Func.Text; p != nil; p = p.Link {
+		for p := s.Func().Text; p != nil; p = p.Link {
 			c0 := c
 			c = pjc.padJump(ctxt, s, p, c)
 
@@ -2173,7 +2175,7 @@ func span6(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		}
 
 		n++
-		if n > 20 {
+		if n > 1000 {
 			ctxt.Diag("span must be looping")
 			log.Fatalf("loop")
 		}
@@ -2226,7 +2228,17 @@ func span6(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			// the first instruction.)
 			return p.From.Index == REG_TLS
 		}
-		obj.MarkUnsafePoints(ctxt, s.Func.Text, newprog, useTLS, nil)
+		obj.MarkUnsafePoints(ctxt, s.Func().Text, newprog, useTLS, nil)
+	}
+
+	// Now that we know byte offsets, we can generate jump table entries.
+	// TODO: could this live in obj instead of obj/$ARCH?
+	for _, jt := range s.Func().JumpTables {
+		for i, p := range jt.Targets {
+			// The ith jumptable entry points to the p.Pc'th
+			// byte in the function symbol s.
+			jt.Sym.WriteAddr(ctxt, int64(i)*8, 8, s, p.Pc)
+		}
 	}
 }
 
@@ -2464,7 +2476,7 @@ func instinit(ctxt *obj.Link) {
 	}
 }
 
-var isAndroid = objabi.GOOS == "android"
+var isAndroid = buildcfg.GOOS == "android"
 
 func prefixof(ctxt *obj.Link, a *obj.Addr) int {
 	if a.Reg < REG_CS && a.Index < REG_CS { // fast path
@@ -3600,7 +3612,7 @@ func (ab *AsmBuf) asmandsz(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog, a *obj
 		goto bad
 	}
 
-	if a.Index != REG_NONE && a.Index != REG_TLS {
+	if a.Index != REG_NONE && a.Index != REG_TLS && !(REG_CS <= a.Index && a.Index <= REG_GS) {
 		base := int(a.Reg)
 		switch a.Name {
 		case obj.NAME_EXTERN,
@@ -3712,7 +3724,8 @@ func (ab *AsmBuf) asmandsz(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog, a *obj
 	}
 
 	if REG_AX <= base && base <= REG_R15 {
-		if a.Index == REG_TLS && !ctxt.Flag_shared && !isAndroid {
+		if a.Index == REG_TLS && !ctxt.Flag_shared && !isAndroid &&
+			!(ctxt.Headtype == objabi.Hwindows && ctxt.Arch.Family == sys.AMD64) {
 			rel = obj.Reloc{}
 			rel.Type = objabi.R_TLS_LE
 			rel.Siz = 4
@@ -3939,10 +3952,7 @@ func isax(a *obj.Addr) bool {
 		return true
 	}
 
-	if a.Index == REG_AX {
-		return true
-	}
-	return false
+	return a.Index == REG_AX
 }
 
 func subreg(p *obj.Prog, from int, to int) {
@@ -4162,11 +4172,11 @@ func (ab *AsmBuf) asmvex(ctxt *obj.Link, rm, v, r *obj.Addr, vex, opcode uint8) 
 //	EVEX.R    : 1 bit | EVEX extension bit      | RxrEvex
 //
 // Examples:
+//
 //	REG_Z30 => 30
 //	REG_X15 => 15
 //	REG_R9  => 9
 //	REG_AX  => 0
-//
 func regIndex(r int16) int {
 	lower3bits := reg[r]
 	high4bit := regrex[r] & Rxr << 1
@@ -4269,7 +4279,7 @@ func (ab *AsmBuf) doasm(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog) {
 		args = append(args, ft)
 	}
 	for i := range p.RestArgs {
-		args = append(args, oclass(ctxt, p, &p.RestArgs[i])*Ymax)
+		args = append(args, oclass(ctxt, p, &p.RestArgs[i].Addr)*Ymax)
 	}
 	if tt != Ynone*Ymax {
 		args = append(args, tt)
@@ -4833,12 +4843,12 @@ func (ab *AsmBuf) doasm(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog) {
 					ctxt.Diag("directly calling duff when dynamically linking Go")
 				}
 
-				if ctxt.Framepointer_enabled && yt.zcase == Zcallduff && ctxt.Arch.Family == sys.AMD64 {
+				if yt.zcase == Zcallduff && ctxt.Arch.Family == sys.AMD64 {
 					// Maintain BP around call, since duffcopy/duffzero can't do it
 					// (the call jumps into the middle of the function).
 					// This makes it possible to see call sites for duffcopy/duffzero in
 					// BP-based profiling tools like Linux perf (which is the
-					// whole point of obj.Framepointer_enabled).
+					// whole point of maintaining frame pointers in Go).
 					// MOVQ BP, -16(SP)
 					// LEAQ -16(SP), BP
 					ab.Put(bpduff1)
@@ -4852,7 +4862,7 @@ func (ab *AsmBuf) doasm(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog) {
 				r.Siz = 4
 				ab.PutInt32(0)
 
-				if ctxt.Framepointer_enabled && yt.zcase == Zcallduff && ctxt.Arch.Family == sys.AMD64 {
+				if yt.zcase == Zcallduff && ctxt.Arch.Family == sys.AMD64 {
 					// Pop BP pushed above.
 					// MOVQ 0(BP), BP
 					ab.Put(bpduff2)
@@ -4886,7 +4896,7 @@ func (ab *AsmBuf) doasm(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog) {
 				// TODO: Check in input, preserve in brchain.
 
 				// Fill in backward jump now.
-				q = p.Pcond
+				q = p.To.Target()
 
 				if q == nil {
 					ctxt.Diag("jmp/branch/loop without target")
@@ -5196,21 +5206,6 @@ func (ab *AsmBuf) doasm(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog) {
 						ab.Put2(0x64, // FS
 							0x8B)
 						ab.asmand(ctxt, cursym, p, &pp.From, &p.To)
-
-					case objabi.Hwindows:
-						// Windows TLS base is always 0x28(GS).
-						pp.From = p.From
-
-						pp.From.Type = obj.TYPE_MEM
-						pp.From.Name = obj.NAME_NONE
-						pp.From.Reg = REG_GS
-						pp.From.Offset = 0x28
-						pp.From.Index = REG_NONE
-						pp.From.Scale = 0
-						ab.rexflag |= Pw
-						ab.Put2(0x65, // GS
-							0x8B)
-						ab.asmand(ctxt, cursym, p, &pp.From, &p.To)
 					}
 				}
 				return
@@ -5310,7 +5305,7 @@ bad:
 		}
 	}
 
-	ctxt.Diag("invalid instruction: %v", p)
+	ctxt.Diag("%s: invalid instruction: %v", cursym.Name, p)
 }
 
 // byteswapreg returns a byte-addressable register (AX, BX, CX, DX)
@@ -5437,10 +5432,10 @@ func (ab *AsmBuf) asmins(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog) {
 
 // unpackOps4 extracts 4 operands from p.
 func unpackOps4(p *obj.Prog) (arg0, arg1, arg2, dst *obj.Addr) {
-	return &p.From, &p.RestArgs[0], &p.RestArgs[1], &p.To
+	return &p.From, &p.RestArgs[0].Addr, &p.RestArgs[1].Addr, &p.To
 }
 
 // unpackOps5 extracts 5 operands from p.
 func unpackOps5(p *obj.Prog) (arg0, arg1, arg2, arg3, dst *obj.Addr) {
-	return &p.From, &p.RestArgs[0], &p.RestArgs[1], &p.RestArgs[2], &p.To
+	return &p.From, &p.RestArgs[0].Addr, &p.RestArgs[1].Addr, &p.RestArgs[2].Addr, &p.To
 }

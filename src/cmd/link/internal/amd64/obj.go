@@ -39,32 +39,33 @@ import (
 func Init() (*sys.Arch, ld.Arch) {
 	arch := sys.ArchAMD64
 
-	fa := funcAlign
-	if objabi.GOAMD64 == "alignedjumps" {
-		fa = 32
-	}
-
 	theArch := ld.Arch{
-		Funcalign:  fa,
+		Funcalign:  funcAlign,
 		Maxalign:   maxAlign,
 		Minalign:   minAlign,
 		Dwarfregsp: dwarfRegSP,
 		Dwarfreglr: dwarfRegLR,
+		// 0xCC is INT $3 - breakpoint instruction
+		CodePad: []byte{0xCC},
 
-		Adddynrel2:       adddynrel2,
+		Plan9Magic:  uint32(4*26*26 + 7),
+		Plan9_64Bit: true,
+
+		Adddynrel:        adddynrel,
 		Archinit:         archinit,
 		Archreloc:        archreloc,
 		Archrelocvariant: archrelocvariant,
-		Asmb:             asmb,
-		Asmb2:            asmb2,
-		Elfreloc2:        elfreloc2,
+		Elfreloc1:        elfreloc1,
+		ElfrelocSize:     24,
 		Elfsetupplt:      elfsetupplt,
-		Gentext2:         gentext2,
+		Gentext:          gentext,
 		Machoreloc1:      machoreloc1,
+		MachorelocSize:   8,
 		PEreloc1:         pereloc1,
 		TLSIEtoLE:        tlsIEtoLE,
 
 		Linuxdynld:     "/lib64/ld-linux-x86-64.so.2",
+		LinuxdynldMusl: "/lib/ld-musl-x86_64.so.1",
 		Freebsddynld:   "/libexec/ld-elf.so.1",
 		Openbsddynld:   "/usr/libexec/ld.so",
 		Netbsddynld:    "/libexec/ld.elf_so",

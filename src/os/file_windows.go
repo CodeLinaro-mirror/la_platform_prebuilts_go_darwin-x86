@@ -26,8 +26,11 @@ type file struct {
 }
 
 // Fd returns the Windows handle referencing the open file.
-// The handle is valid only until f.Close is called or f is garbage collected.
-// On Unix systems this will cause the SetDeadline methods to stop working.
+// If f is closed, the file descriptor becomes invalid.
+// If f is garbage collected, a finalizer may close the file descriptor,
+// making it invalid; see runtime.SetFinalizer for more information on when
+// a finalizer might be run. On Unix systems this will cause the SetDeadline
+// methods to stop working.
 func (file *File) Fd() uintptr {
 	if file == nil {
 		return uintptr(syscall.InvalidHandle)
@@ -83,30 +86,24 @@ func NewFile(fd uintptr, name string) *File {
 
 // Auxiliary information if the File describes a directory
 type dirInfo struct {
-	data     syscall.Win32finddata
-	needdata bool
-	path     string
-	isempty  bool // set if FindFirstFile returns ERROR_FILE_NOT_FOUND
+	h       syscall.Handle // search handle created with FindFirstFile
+	data    syscall.Win32finddata
+	path    string
+	isempty bool // set if FindFirstFile returns ERROR_FILE_NOT_FOUND
+}
+
+func (d *dirInfo) close() error {
+	return syscall.FindClose(d.h)
 }
 
 func epipecheck(file *File, e error) {
 }
 
-// DevNull is the name of the operating system's ``null device.''
+// DevNull is the name of the operating system's “null device.”
 // On Unix-like systems, it is "/dev/null"; on Windows, "NUL".
 const DevNull = "NUL"
 
-func (f *file) isdir() bool { return f != nil && f.dirinfo != nil }
-
-func openFile(name string, flag int, perm FileMode) (file *File, err error) {
-	r, e := syscall.Open(fixLongPath(name), flag|syscall.O_CLOEXEC, syscallMode(perm))
-	if e != nil {
-		return nil, e
-	}
-	return newFile(r, name, "file"), nil
-}
-
-func openDir(name string) (file *File, err error) {
+func openDir(name string) (d *dirInfo, e error) {
 	var mask string
 
 	path := fixLongPath(name)
@@ -127,25 +124,27 @@ func openDir(name string) (file *File, err error) {
 	if e != nil {
 		return nil, e
 	}
-	d := new(dirInfo)
-	r, e := syscall.FindFirstFile(maskp, &d.data)
+	d = new(dirInfo)
+	d.h, e = syscall.FindFirstFile(maskp, &d.data)
 	if e != nil {
 		// FindFirstFile returns ERROR_FILE_NOT_FOUND when
 		// no matching files can be found. Then, if directory
 		// exists, we should proceed.
-		if e != syscall.ERROR_FILE_NOT_FOUND {
-			return nil, e
-		}
+		// If FindFirstFile failed because name does not point
+		// to a directory, we should return ENOTDIR.
 		var fa syscall.Win32FileAttributeData
-		pathp, e := syscall.UTF16PtrFromString(path)
-		if e != nil {
+		pathp, e1 := syscall.UTF16PtrFromString(path)
+		if e1 != nil {
 			return nil, e
 		}
-		e = syscall.GetFileAttributesEx(pathp, syscall.GetFileExInfoStandard, (*byte)(unsafe.Pointer(&fa)))
-		if e != nil {
+		e1 = syscall.GetFileAttributesEx(pathp, syscall.GetFileExInfoStandard, (*byte)(unsafe.Pointer(&fa)))
+		if e1 != nil {
 			return nil, e
 		}
 		if fa.FileAttributes&syscall.FILE_ATTRIBUTE_DIRECTORY == 0 {
+			return nil, syscall.ENOTDIR
+		}
+		if e != syscall.ERROR_FILE_NOT_FOUND {
 			return nil, e
 		}
 		d.isempty = true
@@ -154,48 +153,55 @@ func openDir(name string) (file *File, err error) {
 	if !isAbs(d.path) {
 		d.path, e = syscall.FullPath(d.path)
 		if e != nil {
+			d.close()
 			return nil, e
 		}
 	}
-	f := newFile(r, name, "dir")
-	f.dirinfo = d
-	return f, nil
+	return d, nil
 }
 
 // openFileNolog is the Windows implementation of OpenFile.
 func openFileNolog(name string, flag int, perm FileMode) (*File, error) {
 	if name == "" {
-		return nil, &PathError{"open", name, syscall.ENOENT}
+		return nil, &PathError{Op: "open", Path: name, Err: syscall.ENOENT}
 	}
-	r, errf := openFile(name, flag, perm)
-	if errf == nil {
-		return r, nil
-	}
-	r, errd := openDir(name)
-	if errd == nil {
-		if flag&O_WRONLY != 0 || flag&O_RDWR != 0 {
-			r.Close()
-			return nil, &PathError{"open", name, syscall.EISDIR}
+	path := fixLongPath(name)
+	r, e := syscall.Open(path, flag|syscall.O_CLOEXEC, syscallMode(perm))
+	if e != nil {
+		// We should return EISDIR when we are trying to open a directory with write access.
+		if e == syscall.ERROR_ACCESS_DENIED && (flag&O_WRONLY != 0 || flag&O_RDWR != 0) {
+			pathp, e1 := syscall.UTF16PtrFromString(path)
+			if e1 == nil {
+				var fa syscall.Win32FileAttributeData
+				e1 = syscall.GetFileAttributesEx(pathp, syscall.GetFileExInfoStandard, (*byte)(unsafe.Pointer(&fa)))
+				if e1 == nil && fa.FileAttributes&syscall.FILE_ATTRIBUTE_DIRECTORY != 0 {
+					e = syscall.EISDIR
+				}
+			}
 		}
-		return r, nil
+		return nil, &PathError{Op: "open", Path: name, Err: e}
 	}
-	return nil, &PathError{"open", name, errf}
+	f, e := newFile(r, name, "file"), nil
+	if e != nil {
+		return nil, &PathError{Op: "open", Path: name, Err: e}
+	}
+	return f, nil
 }
 
 func (file *file) close() error {
 	if file == nil {
 		return syscall.EINVAL
 	}
-	if file.isdir() && file.dirinfo.isempty {
-		// "special" empty directories
-		return nil
+	if file.dirinfo != nil {
+		file.dirinfo.close()
+		file.dirinfo = nil
 	}
 	var err error
 	if e := file.pfd.Close(); e != nil {
 		if e == poll.ErrFileClosing {
 			e = ErrClosed
 		}
-		err = &PathError{"close", file.name, e}
+		err = &PathError{Op: "close", Path: file.name, Err: e}
 	}
 
 	// no need for a finalizer anymore
@@ -208,6 +214,12 @@ func (file *file) close() error {
 // relative to the current offset, and 2 means relative to the end.
 // It returns the new offset and an error, if any.
 func (f *File) seek(offset int64, whence int) (ret int64, err error) {
+	if f.dirinfo != nil {
+		// Free cached dirinfo, so we allocate a new one if we
+		// access this file as a directory again. See #35767 and #37161.
+		f.dirinfo.close()
+		f.dirinfo = nil
+	}
 	ret, err = f.pfd.Seek(offset, whence)
 	runtime.KeepAlive(f)
 	return ret, err
@@ -233,7 +245,7 @@ func Truncate(name string, size int64) error {
 func Remove(name string) error {
 	p, e := syscall.UTF16PtrFromString(fixLongPath(name))
 	if e != nil {
-		return &PathError{"remove", name, e}
+		return &PathError{Op: "remove", Path: name, Err: e}
 	}
 
 	// Go file interface forces us to know whether
@@ -264,7 +276,7 @@ func Remove(name string) error {
 			}
 		}
 	}
-	return &PathError{"remove", name, e}
+	return &PathError{Op: "remove", Path: name, Err: e}
 }
 
 func rename(oldname, newname string) error {
@@ -276,10 +288,11 @@ func rename(oldname, newname string) error {
 }
 
 // Pipe returns a connected pair of Files; reads from r return bytes written to w.
-// It returns the files and an error, if any.
+// It returns the files and an error, if any. The Windows handles underlying
+// the returned files are marked as inheritable by child processes.
 func Pipe() (r *File, w *File, err error) {
 	var p [2]syscall.Handle
-	e := syscall.CreatePipe(&p[0], &p[1], nil, 0)
+	e := syscall.Pipe(p[:])
 	if e != nil {
 		return nil, nil, NewSyscallError("pipe", e)
 	}
@@ -323,6 +336,8 @@ func Link(oldname, newname string) error {
 }
 
 // Symlink creates newname as a symbolic link to oldname.
+// On Windows, a symlink to a non-existent oldname creates a file symlink;
+// if oldname is later created as a directory the symlink will not work.
 // If there is an error, it will be of type *LinkError.
 func Symlink(oldname, newname string) error {
 	// '/' does not work in link's content
@@ -361,17 +376,14 @@ func Symlink(oldname, newname string) error {
 		flags |= syscall.SYMBOLIC_LINK_FLAG_DIRECTORY
 	}
 	err = syscall.CreateSymbolicLink(n, o, flags)
-
 	if err != nil {
 		// the unprivileged create flag is unsupported
 		// below Windows 10 (1703, v10.0.14972). retry without it.
 		flags &^= windows.SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE
-
 		err = syscall.CreateSymbolicLink(n, o, flags)
-	}
-
-	if err != nil {
-		return &LinkError{"symlink", oldname, newname, err}
+		if err != nil {
+			return &LinkError{"symlink", oldname, newname, err}
+		}
 	}
 	return nil
 }
@@ -398,10 +410,11 @@ func openSymlink(path string) (syscall.Handle, error) {
 // normaliseLinkPath converts absolute paths returned by
 // DeviceIoControl(h, FSCTL_GET_REPARSE_POINT, ...)
 // into paths acceptable by all Windows APIs.
-// For example, it coverts
-//  \??\C:\foo\bar into C:\foo\bar
-//  \??\UNC\foo\bar into \\foo\bar
-//  \??\Volume{abc}\ into C:\
+// For example, it converts
+//
+//	\??\C:\foo\bar into C:\foo\bar
+//	\??\UNC\foo\bar into \\foo\bar
+//	\??\Volume{abc}\ into C:\
 func normaliseLinkPath(path string) (string, error) {
 	if len(path) < 4 || path[:4] != `\??\` {
 		// unexpected path, return it as is
@@ -490,7 +503,7 @@ func readlink(path string) (string, error) {
 func Readlink(name string) (string, error) {
 	s, err := readlink(fixLongPath(name))
 	if err != nil {
-		return "", &PathError{"readlink", name, err}
+		return "", &PathError{Op: "readlink", Path: name, Err: err}
 	}
 	return s, nil
 }

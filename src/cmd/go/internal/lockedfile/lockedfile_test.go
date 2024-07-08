@@ -3,16 +3,15 @@
 // license that can be found in the LICENSE file.
 
 // js does not support inter-process file locking.
-// +build !js
+//
+//go:build !js
 
 package lockedfile_test
 
 import (
 	"fmt"
 	"internal/testenv"
-	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -23,7 +22,7 @@ import (
 func mustTempDir(t *testing.T) (dir string, remove func()) {
 	t.Helper()
 
-	dir, err := ioutil.TempDir("", filepath.Base(t.Name()))
+	dir, err := os.MkdirTemp("", filepath.Base(t.Name()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,8 +154,8 @@ func TestCanLockExistingFile(t *testing.T) {
 	defer remove()
 	path := filepath.Join(dir, "existing.txt")
 
-	if err := ioutil.WriteFile(path, []byte("ok"), 0777); err != nil {
-		t.Fatalf("ioutil.WriteFile: %v", err)
+	if err := os.WriteFile(path, []byte("ok"), 0777); err != nil {
+		t.Fatalf("os.WriteFile: %v", err)
 	}
 
 	f, err := lockedfile.Edit(path)
@@ -201,7 +200,7 @@ func TestSpuriousEDEADLK(t *testing.T) {
 		}
 		defer b.Close()
 
-		if err := ioutil.WriteFile(filepath.Join(dir, "locked"), []byte("ok"), 0666); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "locked"), []byte("ok"), 0666); err != nil {
 			t.Fatal(err)
 		}
 
@@ -226,7 +225,7 @@ func TestSpuriousEDEADLK(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run="+t.Name())
+	cmd := testenv.Command(t, os.Args[0], "-test.run="+t.Name())
 	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=%s", dirVar, dir))
 
 	qDone := make(chan struct{})

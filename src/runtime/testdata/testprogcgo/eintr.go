@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build !plan9 && !windows
 // +build !plan9,!windows
 
 package main
@@ -32,7 +33,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -70,6 +70,7 @@ func EINTR() {
 
 // spin does CPU bound spinning and allocating for a millisecond,
 // to get a SIGURG.
+//
 //go:noinline
 func spin() (float64, []byte) {
 	stop := time.Now().Add(time.Millisecond)
@@ -242,5 +243,5 @@ func testExec(wg *sync.WaitGroup) {
 
 // Block blocks until stdin is closed.
 func Block() {
-	io.Copy(ioutil.Discard, os.Stdin)
+	io.Copy(io.Discard, os.Stdin)
 }

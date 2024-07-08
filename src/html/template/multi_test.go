@@ -7,7 +7,9 @@
 package template
 
 import (
-	"bytes"
+	"archive/zip"
+	"os"
+	"strings"
 	"testing"
 	"text/template/parse"
 )
@@ -82,6 +84,35 @@ func TestParseGlob(t *testing.T) {
 	testExecute(multiExecTests, template, t)
 }
 
+func TestParseFS(t *testing.T) {
+	fs := os.DirFS("testdata")
+
+	{
+		_, err := ParseFS(fs, "DOES NOT EXIST")
+		if err == nil {
+			t.Error("expected error for non-existent file; got none")
+		}
+	}
+
+	{
+		template := New("root")
+		_, err := template.ParseFS(fs, "file1.tmpl", "file2.tmpl")
+		if err != nil {
+			t.Fatalf("error parsing files: %v", err)
+		}
+		testExecute(multiExecTests, template, t)
+	}
+
+	{
+		template := New("root")
+		_, err := template.ParseFS(fs, "file*.tmpl")
+		if err != nil {
+			t.Fatalf("error parsing files: %v", err)
+		}
+		testExecute(multiExecTests, template, t)
+	}
+}
+
 // In these tests, actual content (not just template definitions) comes from the parsed files.
 
 var templateFileExecTests = []execTest{
@@ -98,6 +129,18 @@ func TestParseFilesWithData(t *testing.T) {
 
 func TestParseGlobWithData(t *testing.T) {
 	template, err := New("root").ParseGlob("testdata/tmpl*.tmpl")
+	if err != nil {
+		t.Fatalf("error parsing files: %v", err)
+	}
+	testExecute(templateFileExecTests, template, t)
+}
+
+func TestParseZipFS(t *testing.T) {
+	z, err := zip.OpenReader("testdata/fs.zip")
+	if err != nil {
+		t.Fatalf("error parsing zip: %v", err)
+	}
+	template, err := New("root").ParseFS(z, "tmpl*.tmpl")
 	if err != nil {
 		t.Fatalf("error parsing files: %v", err)
 	}
@@ -202,7 +245,7 @@ func TestEmptyTemplate(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		buf := &bytes.Buffer{}
+		buf := &strings.Builder{}
 		if err := m.Execute(buf, c.in); err != nil {
 			t.Error(i, err)
 			continue
@@ -237,7 +280,7 @@ func TestIssue19294(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		var buf bytes.Buffer
+		var buf strings.Builder
 		res.Execute(&buf, 0)
 		if buf.String() != "stylesheet" {
 			t.Fatalf("iteration %d: got %q; expected %q", i, buf.String(), "stylesheet")

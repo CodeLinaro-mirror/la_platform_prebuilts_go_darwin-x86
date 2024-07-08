@@ -10,7 +10,8 @@
 package runtime
 
 import (
-	"runtime/internal/sys"
+	"internal/goarch"
+	"runtime/internal/atomic"
 	"unsafe"
 )
 
@@ -67,6 +68,30 @@ func (a addrRange) subtract(b addrRange) addrRange {
 		a.limit = b.base
 	}
 	return a
+}
+
+// takeFromFront takes len bytes from the front of the address range, aligning
+// the base to align first. On success, returns the aligned start of the region
+// taken and true.
+func (a *addrRange) takeFromFront(len uintptr, align uint8) (uintptr, bool) {
+	base := alignUp(a.base.addr(), uintptr(align)) + len
+	if base > a.limit.addr() {
+		return 0, false
+	}
+	a.base = offAddr{base}
+	return base - len, true
+}
+
+// takeFromBack takes len bytes from the end of the address range, aligning
+// the limit to align after subtracting len. On success, returns the aligned
+// start of the region taken and true.
+func (a *addrRange) takeFromBack(len uintptr, align uint8) (uintptr, bool) {
+	limit := alignDown(a.limit.addr()-len, uintptr(align))
+	if a.base.addr() > limit {
+		return 0, false
+	}
+	a.limit = offAddr{limit}
+	return limit, true
 }
 
 // removeGreaterEqual removes all addresses in a greater than or equal
@@ -141,6 +166,69 @@ func (l offAddr) addr() uintptr {
 	return l.a
 }
 
+// atomicOffAddr is like offAddr, but operations on it are atomic.
+// It also contains operations to be able to store marked addresses
+// to ensure that they're not overridden until they've been seen.
+type atomicOffAddr struct {
+	// a contains the offset address, unlike offAddr.
+	a atomic.Int64
+}
+
+// Clear attempts to store minOffAddr in atomicOffAddr. It may fail
+// if a marked value is placed in the box in the meanwhile.
+func (b *atomicOffAddr) Clear() {
+	for {
+		old := b.a.Load()
+		if old < 0 {
+			return
+		}
+		if b.a.CompareAndSwap(old, int64(minOffAddr.addr()-arenaBaseOffset)) {
+			return
+		}
+	}
+}
+
+// StoreMin stores addr if it's less than the current value in the
+// offset address space if the current value is not marked.
+func (b *atomicOffAddr) StoreMin(addr uintptr) {
+	new := int64(addr - arenaBaseOffset)
+	for {
+		old := b.a.Load()
+		if old < new {
+			return
+		}
+		if b.a.CompareAndSwap(old, new) {
+			return
+		}
+	}
+}
+
+// StoreUnmark attempts to unmark the value in atomicOffAddr and
+// replace it with newAddr. markedAddr must be a marked address
+// returned by Load. This function will not store newAddr if the
+// box no longer contains markedAddr.
+func (b *atomicOffAddr) StoreUnmark(markedAddr, newAddr uintptr) {
+	b.a.CompareAndSwap(-int64(markedAddr-arenaBaseOffset), int64(newAddr-arenaBaseOffset))
+}
+
+// StoreMarked stores addr but first converted to the offset address
+// space and then negated.
+func (b *atomicOffAddr) StoreMarked(addr uintptr) {
+	b.a.Store(-int64(addr - arenaBaseOffset))
+}
+
+// Load returns the address in the box as a virtual address. It also
+// returns if the value was marked or not.
+func (b *atomicOffAddr) Load() (uintptr, bool) {
+	v := b.a.Load()
+	wasMarked := false
+	if v < 0 {
+		wasMarked = true
+		v = -v
+	}
+	return uintptr(v) + arenaBaseOffset, wasMarked
+}
+
 // addrRanges is a data structure holding a collection of ranges of
 // address space.
 //
@@ -160,32 +248,58 @@ type addrRanges struct {
 	totalBytes uintptr
 
 	// sysStat is the stat to track allocations by this type
-	sysStat *uint64
+	sysStat *sysMemStat
 }
 
-func (a *addrRanges) init(sysStat *uint64) {
+func (a *addrRanges) init(sysStat *sysMemStat) {
 	ranges := (*notInHeapSlice)(unsafe.Pointer(&a.ranges))
 	ranges.len = 0
 	ranges.cap = 16
-	ranges.array = (*notInHeap)(persistentalloc(unsafe.Sizeof(addrRange{})*uintptr(ranges.cap), sys.PtrSize, sysStat))
+	ranges.array = (*notInHeap)(persistentalloc(unsafe.Sizeof(addrRange{})*uintptr(ranges.cap), goarch.PtrSize, sysStat))
 	a.sysStat = sysStat
 	a.totalBytes = 0
 }
 
-// findSucc returns the first index in a such that base is
+// findSucc returns the first index in a such that addr is
 // less than the base of the addrRange at that index.
 func (a *addrRanges) findSucc(addr uintptr) int {
-	// TODO(mknyszek): Consider a binary search for large arrays.
-	// While iterating over these ranges is potentially expensive,
-	// the expected number of ranges is small, ideally just 1,
-	// since Go heaps are usually mostly contiguous.
 	base := offAddr{addr}
-	for i := range a.ranges {
+
+	// Narrow down the search space via a binary search
+	// for large addrRanges until we have at most iterMax
+	// candidates left.
+	const iterMax = 8
+	bot, top := 0, len(a.ranges)
+	for top-bot > iterMax {
+		i := ((top - bot) / 2) + bot
+		if a.ranges[i].contains(base.addr()) {
+			// a.ranges[i] contains base, so
+			// its successor is the next index.
+			return i + 1
+		}
+		if base.lessThan(a.ranges[i].base) {
+			// In this case i might actually be
+			// the successor, but we can't be sure
+			// until we check the ones before it.
+			top = i
+		} else {
+			// In this case we know base is
+			// greater than or equal to a.ranges[i].limit-1,
+			// so i is definitely not the successor.
+			// We already checked i, so pick the next
+			// one.
+			bot = i + 1
+		}
+	}
+	// There are top-bot candidates left, so
+	// iterate over them and find the first that
+	// base is strictly less than.
+	for i := bot; i < top; i++ {
 		if base.lessThan(a.ranges[i].base) {
 			return i
 		}
 	}
-	return len(a.ranges)
+	return top
 }
 
 // findAddrGreaterEqual returns the smallest address represented by a
@@ -218,7 +332,7 @@ func (a *addrRanges) contains(addr uintptr) bool {
 
 // add inserts a new address range to a.
 //
-// r must not overlap with any address range in a.
+// r must not overlap with any address range in a and r.size() must be > 0.
 func (a *addrRanges) add(r addrRange) {
 	// The copies in this function are potentially expensive, but this data
 	// structure is meant to represent the Go heap. At worst, copying this
@@ -229,6 +343,12 @@ func (a *addrRanges) add(r addrRange) {
 	// of 16) and Go heaps are usually mostly contiguous, so the chance that
 	// an addrRanges even grows to that size is extremely low.
 
+	// An empty range has no effect on the set of addresses represented
+	// by a, but passing a zero-sized range is almost always a bug.
+	if r.size() == 0 {
+		print("runtime: range = {", hex(r.base.addr()), ", ", hex(r.limit.addr()), "}\n")
+		throw("attempted to add zero-sized address range")
+	}
 	// Because we assume r is not currently represented in a,
 	// findSucc gives us our insertion index.
 	i := a.findSucc(r.base.addr())
@@ -262,7 +382,7 @@ func (a *addrRanges) add(r addrRange) {
 			ranges := (*notInHeapSlice)(unsafe.Pointer(&a.ranges))
 			ranges.len = len(oldRanges) + 1
 			ranges.cap = cap(oldRanges) * 2
-			ranges.array = (*notInHeap)(persistentalloc(unsafe.Sizeof(addrRange{})*uintptr(ranges.cap), sys.PtrSize, a.sysStat))
+			ranges.array = (*notInHeap)(persistentalloc(unsafe.Sizeof(addrRange{})*uintptr(ranges.cap), goarch.PtrSize, a.sysStat))
 
 			// Copy in the old array, but make space for the new range.
 			copy(a.ranges[:i], oldRanges[:i])
@@ -332,7 +452,7 @@ func (a *addrRanges) cloneInto(b *addrRanges) {
 		ranges := (*notInHeapSlice)(unsafe.Pointer(&b.ranges))
 		ranges.len = 0
 		ranges.cap = cap(a.ranges)
-		ranges.array = (*notInHeap)(persistentalloc(unsafe.Sizeof(addrRange{})*uintptr(ranges.cap), sys.PtrSize, b.sysStat))
+		ranges.array = (*notInHeap)(persistentalloc(unsafe.Sizeof(addrRange{})*uintptr(ranges.cap), goarch.PtrSize, b.sysStat))
 	}
 	b.ranges = b.ranges[:len(a.ranges)]
 	b.totalBytes = a.totalBytes

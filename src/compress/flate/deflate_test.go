@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"internal/testenv"
 	"io"
-	"io/ioutil"
 	"math/rand"
+	"os"
 	"reflect"
 	"runtime/debug"
 	"sync"
@@ -125,6 +125,40 @@ func TestDeflate(t *testing.T) {
 	}
 }
 
+func TestWriterClose(t *testing.T) {
+	b := new(bytes.Buffer)
+	zw, err := NewWriter(b, 6)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+
+	if c, err := zw.Write([]byte("Test")); err != nil || c != 4 {
+		t.Fatalf("Write to not closed writer: %s, %d", err, c)
+	}
+
+	if err := zw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	afterClose := b.Len()
+
+	if c, err := zw.Write([]byte("Test")); err == nil || c != 0 {
+		t.Fatalf("Write to closed writer: %v, %d", err, c)
+	}
+
+	if err := zw.Flush(); err == nil {
+		t.Fatalf("Flush to closed writer: %s", err)
+	}
+
+	if err := zw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if afterClose != b.Len() {
+		t.Fatalf("Writer wrote data after close. After close: %d. After writes on closed stream: %d", afterClose, b.Len())
+	}
+}
+
 // A sparseReader returns a stream consisting of 0s followed by 1<<16 1s.
 // This tests missing hash references in a very large input.
 type sparseReader struct {
@@ -157,7 +191,7 @@ func TestVeryLongSparseChunk(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping sparse chunk during short test")
 	}
-	w, err := NewWriter(ioutil.Discard, 1)
+	w, err := NewWriter(io.Discard, 1)
 	if err != nil {
 		t.Errorf("NewWriter: %v", err)
 		return
@@ -294,7 +328,7 @@ func testSync(t *testing.T, level int, input []byte, name string) {
 
 	// stream should work for ordinary reader too
 	r = NewReader(buf1)
-	out, err = ioutil.ReadAll(r)
+	out, err = io.ReadAll(r)
 	if err != nil {
 		t.Errorf("testSync: read: %s", err)
 		return
@@ -322,7 +356,7 @@ func testToFromWithLevelAndLimit(t *testing.T, level int, input []byte, name str
 		t.Logf("level: %d, size:%.2f%%, %d b\n", level, float64(buffer.Len()*100)/float64(limit), buffer.Len())
 	}
 	r := NewReader(&buffer)
-	out, err := ioutil.ReadAll(r)
+	out, err := io.ReadAll(r)
 	if err != nil {
 		t.Errorf("read: %s", err)
 		return
@@ -387,7 +421,7 @@ func TestDeflateInflateString(t *testing.T) {
 		t.Skip("skipping in short mode")
 	}
 	for _, test := range deflateInflateStringTests {
-		gold, err := ioutil.ReadFile(test.filename)
+		gold, err := os.ReadFile(test.filename)
 		if err != nil {
 			t.Error(err)
 		}
@@ -415,7 +449,7 @@ func TestReaderDict(t *testing.T) {
 	w.Close()
 
 	r := NewReaderDict(&b, []byte(dict))
-	data, err := ioutil.ReadAll(r)
+	data, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +490,7 @@ func TestRegression2508(t *testing.T) {
 		t.Logf("test disabled with -short")
 		return
 	}
-	w, err := NewWriter(ioutil.Discard, 1)
+	w, err := NewWriter(io.Discard, 1)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -475,7 +509,7 @@ func TestWriterReset(t *testing.T) {
 		if testing.Short() && level > 1 {
 			break
 		}
-		w, err := NewWriter(ioutil.Discard, level)
+		w, err := NewWriter(io.Discard, level)
 		if err != nil {
 			t.Fatalf("NewWriter: %v", err)
 		}
@@ -487,9 +521,9 @@ func TestWriterReset(t *testing.T) {
 		for i := 0; i < n; i++ {
 			w.Write(buf)
 		}
-		w.Reset(ioutil.Discard)
+		w.Reset(io.Discard)
 
-		wref, err := NewWriter(ioutil.Discard, level)
+		wref, err := NewWriter(io.Discard, level)
 		if err != nil {
 			t.Fatalf("NewWriter: %v", err)
 		}
@@ -654,7 +688,7 @@ func TestBestSpeed(t *testing.T) {
 				}
 
 				r := NewReader(buf)
-				got, err := ioutil.ReadAll(r)
+				got, err := io.ReadAll(r)
 				if err != nil {
 					t.Errorf("i=%d, firstN=%d, flush=%t: ReadAll: %v", i, firstN, flush, err)
 					continue
@@ -683,9 +717,9 @@ func (w *failWriter) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func TestWriterPersistentError(t *testing.T) {
+func TestWriterPersistentWriteError(t *testing.T) {
 	t.Parallel()
-	d, err := ioutil.ReadFile("../../testdata/Isaac.Newton-Opticks.txt")
+	d, err := os.ReadFile("../../testdata/Isaac.Newton-Opticks.txt")
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -706,16 +740,68 @@ func TestWriterPersistentError(t *testing.T) {
 
 		_, werr := zw.Write(d)
 		cerr := zw.Close()
+		ferr := zw.Flush()
 		if werr != errIO && werr != nil {
 			t.Errorf("test %d, mismatching Write error: got %v, want %v", i, werr, errIO)
 		}
 		if cerr != errIO && fw.n < 0 {
 			t.Errorf("test %d, mismatching Close error: got %v, want %v", i, cerr, errIO)
 		}
+		if ferr != errIO && fw.n < 0 {
+			t.Errorf("test %d, mismatching Flush error: got %v, want %v", i, ferr, errIO)
+		}
 		if fw.n >= 0 {
 			// At this point, the failure threshold was sufficiently high enough
 			// that we wrote the whole stream without any errors.
 			return
+		}
+	}
+}
+func TestWriterPersistentFlushError(t *testing.T) {
+	zw, err := NewWriter(&failWriter{0}, DefaultCompression)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	flushErr := zw.Flush()
+	closeErr := zw.Close()
+	_, writeErr := zw.Write([]byte("Test"))
+	checkErrors([]error{closeErr, flushErr, writeErr}, errIO, t)
+}
+
+func TestWriterPersistentCloseError(t *testing.T) {
+	// If underlying writer return error on closing stream we should persistent this error across all writer calls.
+	zw, err := NewWriter(&failWriter{0}, DefaultCompression)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	closeErr := zw.Close()
+	flushErr := zw.Flush()
+	_, writeErr := zw.Write([]byte("Test"))
+	checkErrors([]error{closeErr, flushErr, writeErr}, errIO, t)
+
+	// After closing writer we should persistent "write after close" error across Flush and Write calls, but return nil
+	// on next Close calls.
+	var b bytes.Buffer
+	zw.Reset(&b)
+	err = zw.Close()
+	if err != nil {
+		t.Fatalf("First call to close returned error: %s", err)
+	}
+	err = zw.Close()
+	if err != nil {
+		t.Fatalf("Second call to close returned error: %s", err)
+	}
+
+	flushErr = zw.Flush()
+	_, writeErr = zw.Write([]byte("Test"))
+	checkErrors([]error{flushErr, writeErr}, errWriterClosed, t)
+}
+
+func checkErrors(got []error, want error, t *testing.T) {
+	t.Helper()
+	for _, err := range got {
+		if err != want {
+			t.Errorf("Errors dosn't match\nWant: %s\nGot: %s", want, got)
 		}
 	}
 }
@@ -881,7 +967,7 @@ func TestBestSpeedMaxMatchOffset(t *testing.T) {
 				}
 
 				r := NewReader(buf)
-				dst, err := ioutil.ReadAll(r)
+				dst, err := io.ReadAll(r)
 				r.Close()
 				if err != nil {
 					report("ReadAll: ", err)
@@ -968,7 +1054,7 @@ func TestMaxStackSize(t *testing.T) {
 		wg.Add(1)
 		go func(level int) {
 			defer wg.Done()
-			zw, err := NewWriter(ioutil.Discard, level)
+			zw, err := NewWriter(io.Discard, level)
 			if err != nil {
 				t.Errorf("level %d, NewWriter() = %v, want nil", level, err)
 			}
@@ -978,7 +1064,7 @@ func TestMaxStackSize(t *testing.T) {
 			if err := zw.Close(); err != nil {
 				t.Errorf("level %d, Close() = %v, want nil", level, err)
 			}
-			zw.Reset(ioutil.Discard)
+			zw.Reset(io.Discard)
 		}(level)
 	}
 }

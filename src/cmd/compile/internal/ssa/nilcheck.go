@@ -5,8 +5,9 @@
 package ssa
 
 import (
-	"cmd/internal/objabi"
+	"cmd/compile/internal/ir"
 	"cmd/internal/src"
+	"internal/buildcfg"
 )
 
 // nilcheckelim eliminates unnecessary nil checks.
@@ -40,7 +41,8 @@ func nilcheckelim(f *Func) {
 	// map from value ID to bool indicating if value is known to be non-nil
 	// in the current dominator path being walked. This slice is updated by
 	// walkStates to maintain the known non-nil values.
-	nonNilValues := make([]bool, f.NumValues())
+	nonNilValues := f.Cache.allocBoolSlice(f.NumValues())
+	defer f.Cache.freeBoolSlice(nonNilValues)
 
 	// make an initial pass identifying any non-nil values
 	for _, b := range f.Blocks {
@@ -85,7 +87,8 @@ func nilcheckelim(f *Func) {
 	// allocate auxiliary date structures for computing store order
 	sset := f.newSparseSet(f.NumValues())
 	defer f.retSparseSet(sset)
-	storeNumber := make([]int32, f.NumValues())
+	storeNumber := f.Cache.allocInt32Slice(f.NumValues())
+	defer f.Cache.freeInt32Slice(storeNumber)
 
 	// perform a depth first walk of the dominee tree
 	for len(work) > 0 {
@@ -191,7 +194,7 @@ func nilcheckelim(f *Func) {
 const minZeroPage = 4096
 
 // faultOnLoad is true if a load to an address below minZeroPage will trigger a SIGSEGV.
-var faultOnLoad = objabi.GOOS != "aix"
+var faultOnLoad = buildcfg.GOOS != "aix"
 
 // nilcheckelim2 eliminates unnecessary nil checks.
 // Runs after lowering and scheduling.
@@ -235,7 +238,7 @@ func nilcheckelim2(f *Func) {
 				continue
 			}
 			if v.Type.IsMemory() || v.Type.IsTuple() && v.Type.FieldType(1).IsMemory() {
-				if v.Op == OpVarKill || v.Op == OpVarLive || (v.Op == OpVarDef && !v.Aux.(GCNode).Typ().HasPointers()) {
+				if v.Op == OpVarLive || (v.Op == OpVarDef && !v.Aux.(*ir.Name).Type().HasPointers()) {
 					// These ops don't really change memory.
 					continue
 					// Note: OpVarDef requires that the defined variable not have pointers.
@@ -307,7 +310,7 @@ func nilcheckelim2(f *Func) {
 				}
 				// This instruction is guaranteed to fault if ptr is nil.
 				// Any previous nil check op is unnecessary.
-				unnecessary.set(ptr.ID, int32(i), src.NoXPos)
+				unnecessary.set(ptr.ID, int32(i))
 			}
 		}
 		// Remove values we've clobbered with OpUnknown.

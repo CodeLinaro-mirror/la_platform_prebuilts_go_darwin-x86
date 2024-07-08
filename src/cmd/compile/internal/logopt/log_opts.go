@@ -6,10 +6,10 @@ package logopt
 
 import (
 	"cmd/internal/obj"
-	"cmd/internal/objabi"
 	"cmd/internal/src"
 	"encoding/json"
 	"fmt"
+	"internal/buildcfg"
 	"io"
 	"log"
 	"net/url"
@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 // This implements (non)optimization logging for -json option to the Go compiler
@@ -223,11 +224,11 @@ type Diagnostic struct {
 // A LoggedOpt is what the compiler produces and accumulates,
 // to be converted to JSON for human or IDE consumption.
 type LoggedOpt struct {
-	pos    src.XPos      // Source code position at which the event occurred. If it is inlined, outer and all inlined locations will appear in JSON.
-	pass   string        // For human/adhoc consumption; does not appear in JSON (yet)
-	fname  string        // For human/adhoc consumption; does not appear in JSON (yet)
-	what   string        // The (non) optimization; "nilcheck", "boundsCheck", "inline", "noInline"
-	target []interface{} // Optional target(s) or parameter(s) of "what" -- what was inlined, why it was not, size of copy, etc. 1st is most important/relevant.
+	pos          src.XPos      // Source code position at which the event occurred. If it is inlined, outer and all inlined locations will appear in JSON.
+	compilerPass string        // Compiler pass.  For human/adhoc consumption; does not appear in JSON (yet)
+	functionName string        // Function name.  For human/adhoc consumption; does not appear in JSON (yet)
+	what         string        // The (non) optimization; "nilcheck", "boundsCheck", "inline", "noInline"
+	target       []interface{} // Optional target(s) or parameter(s) of "what" -- what was inlined, why it was not, size of copy, etc. 1st is most important/relevant.
 }
 
 type logFormat uint8
@@ -240,12 +241,13 @@ const (
 var Format = None
 var dest string
 
+// LogJsonOption parses and validates the version,directory value attached to the -json compiler flag.
 func LogJsonOption(flagValue string) {
 	version, directory := parseLogFlag("json", flagValue)
 	if version != 0 {
 		log.Fatal("-json version must be 0")
 	}
-	checkLogPath("json", directory)
+	dest = checkLogPath(directory)
 	Format = Json0
 }
 
@@ -268,51 +270,80 @@ func parseLogFlag(flag, value string) (version int, directory string) {
 	return
 }
 
-// checkLogPath does superficial early checking of the string specifying
-// the directory to which optimizer logging is directed, and if
-// it passes the test, stores the string in LO_dir
-func checkLogPath(flag, destination string) {
-	sep := string(os.PathSeparator)
-	if strings.HasPrefix(destination, "/") || strings.HasPrefix(destination, sep) {
-		err := os.MkdirAll(destination, 0755)
-		if err != nil {
-			log.Fatalf("optimizer logging destination '<version>,<directory>' but could not create <directory>: err=%v", err)
-		}
-	} else if strings.HasPrefix(destination, "file://") { // IKWIAD, or Windows C:\foo\bar\baz
+// isWindowsDriveURIPath returns true if the file URI is of the format used by
+// Windows URIs. The url.Parse package does not specially handle Windows paths
+// (see golang/go#6027), so we check if the URI path has a drive prefix (e.g. "/C:").
+// (copied from tools/internal/span/uri.go)
+// this is less comprehensive that the processing in filepath.IsAbs on Windows.
+func isWindowsDriveURIPath(uri string) bool {
+	if len(uri) < 4 {
+		return false
+	}
+	return uri[0] == '/' && unicode.IsLetter(rune(uri[1])) && uri[2] == ':'
+}
+
+func parseLogPath(destination string) (string, string) {
+	if filepath.IsAbs(destination) {
+		return filepath.Clean(destination), ""
+	}
+	if strings.HasPrefix(destination, "file://") { // IKWIAD, or Windows C:\foo\bar\baz
 		uri, err := url.Parse(destination)
 		if err != nil {
-			log.Fatalf("optimizer logging destination looked like file:// URI but failed to parse: err=%v", err)
+			return "", fmt.Sprintf("optimizer logging destination looked like file:// URI but failed to parse: err=%v", err)
 		}
 		destination = uri.Host + uri.Path
-		err = os.MkdirAll(destination, 0755)
-		if err != nil {
-			log.Fatalf("optimizer logging destination '<version>,<directory>' but could not create %s: err=%v", destination, err)
+		if isWindowsDriveURIPath(destination) {
+			// strip leading / from /C:
+			// unlike tools/internal/span/uri.go, do not uppercase the drive letter -- let filepath.Clean do what it does.
+			destination = destination[1:]
 		}
-	} else {
-		log.Fatalf("optimizer logging destination %s was neither %s-prefixed directory nor file://-prefixed file URI", destination, sep)
+		return filepath.Clean(destination), ""
 	}
-	dest = destination
+	return "", fmt.Sprintf("optimizer logging destination %s was neither %s-prefixed directory nor file://-prefixed file URI", destination, string(filepath.Separator))
+}
+
+// checkLogPath does superficial early checking of the string specifying
+// the directory to which optimizer logging is directed, and if
+// it passes the test, stores the string in LO_dir.
+func checkLogPath(destination string) string {
+	path, complaint := parseLogPath(destination)
+	if complaint != "" {
+		log.Fatalf(complaint)
+	}
+	err := os.MkdirAll(path, 0755)
+	if err != nil {
+		log.Fatalf("optimizer logging destination '<version>,<directory>' but could not create <directory>: err=%v", err)
+	}
+	return path
 }
 
 var loggedOpts []*LoggedOpt
 var mu = sync.Mutex{} // mu protects loggedOpts.
 
-func NewLoggedOpt(pos src.XPos, what, pass, fname string, args ...interface{}) *LoggedOpt {
+// NewLoggedOpt allocates a new LoggedOpt, to later be passed to either NewLoggedOpt or LogOpt as "args".
+// Pos is the source position (including inlining), what is the message, pass is which pass created the message,
+// funcName is the name of the function
+// A typical use for this to accumulate an explanation for a missed optimization, for example, why did something escape?
+func NewLoggedOpt(pos src.XPos, what, pass, funcName string, args ...interface{}) *LoggedOpt {
 	pass = strings.Replace(pass, " ", "_", -1)
-	return &LoggedOpt{pos, pass, fname, what, args}
+	return &LoggedOpt{pos, pass, funcName, what, args}
 }
 
-func LogOpt(pos src.XPos, what, pass, fname string, args ...interface{}) {
+// LogOpt logs information about a (usually missed) optimization performed by the compiler.
+// Pos is the source position (including inlining), what is the message, pass is which pass created the message,
+// funcName is the name of the function.
+func LogOpt(pos src.XPos, what, pass, funcName string, args ...interface{}) {
 	if Format == None {
 		return
 	}
-	lo := NewLoggedOpt(pos, what, pass, fname, args...)
+	lo := NewLoggedOpt(pos, what, pass, funcName, args...)
 	mu.Lock()
 	defer mu.Unlock()
 	// Because of concurrent calls from back end, no telling what the order will be, but is stable-sorted by outer Pos before use.
 	loggedOpts = append(loggedOpts, lo)
 }
 
+// Enabled returns whether optimization logging is enabled.
 func Enabled() bool {
 	switch Format {
 	case None:
@@ -345,7 +376,7 @@ func writerForLSP(subdirpath, file string) io.WriteCloser {
 	if lastdot != -1 {
 		basename = basename[:lastdot]
 	}
-	basename = pathEscape(basename)
+	basename = url.PathEscape(basename)
 
 	// Assume a directory, make a file
 	p := filepath.Join(subdirpath, basename+".json")
@@ -374,10 +405,13 @@ func uriIfy(f string) DocumentURI {
 // Return filename, replacing a first occurrence of $GOROOT with the
 // actual value of the GOROOT (because LSP does not speak "$GOROOT").
 func uprootedPath(filename string) string {
-	if !strings.HasPrefix(filename, "$GOROOT/") {
+	if filename == "" {
+		return "__unnamed__"
+	}
+	if buildcfg.GOROOT == "" || !strings.HasPrefix(filename, "$GOROOT/") {
 		return filename
 	}
-	return objabi.GOROOT + filename[len("$GOROOT"):]
+	return buildcfg.GOROOT + filename[len("$GOROOT"):]
 }
 
 // FlushLoggedOpts flushes all the accumulated optimization log entries.
@@ -397,7 +431,7 @@ func FlushLoggedOpts(ctxt *obj.Link, slashPkgPath string) {
 		if slashPkgPath == "" {
 			slashPkgPath = "\000"
 		}
-		subdirpath := filepath.Join(dest, pathEscape(slashPkgPath))
+		subdirpath := filepath.Join(dest, url.PathEscape(slashPkgPath))
 		err := os.MkdirAll(subdirpath, 0755)
 		if err != nil {
 			log.Fatalf("Could not create directory %s for logging optimizer actions, %v", subdirpath, err)
@@ -417,7 +451,7 @@ func FlushLoggedOpts(ctxt *obj.Link, slashPkgPath string) {
 				currentFile = p0f
 				w = writerForLSP(subdirpath, currentFile)
 				encoder = json.NewEncoder(w)
-				encoder.Encode(VersionHeader{Version: 0, Package: slashPkgPath, Goos: objabi.GOOS, Goarch: objabi.GOARCH, GcVersion: objabi.Version, File: currentFile})
+				encoder.Encode(VersionHeader{Version: 0, Package: slashPkgPath, Goos: buildcfg.GOOS, Goarch: buildcfg.GOARCH, GcVersion: buildcfg.Version, File: currentFile})
 			}
 
 			// The first "target" is the most important one.
@@ -459,17 +493,19 @@ func FlushLoggedOpts(ctxt *obj.Link, slashPkgPath string) {
 	}
 }
 
+// newPointRange returns a single-position Range for the compiler source location p.
 func newPointRange(p src.Pos) Range {
 	return Range{Start: Position{p.Line(), p.Col()},
 		End: Position{p.Line(), p.Col()}}
 }
 
+// newLocation returns the Location for the compiler source location p.
 func newLocation(p src.Pos) Location {
 	loc := Location{URI: uriIfy(uprootedPath(p.Filename())), Range: newPointRange(p)}
 	return loc
 }
 
-// appendInlinedPos extracts inlining information from posTmp and append it to diagnostic
+// appendInlinedPos extracts inlining information from posTmp and append it to diagnostic.
 func appendInlinedPos(posTmp []src.Pos, diagnostic *Diagnostic) {
 	for i := 1; i < len(posTmp); i++ {
 		p := posTmp[i]

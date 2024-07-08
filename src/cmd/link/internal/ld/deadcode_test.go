@@ -7,9 +7,6 @@ package ld
 import (
 	"bytes"
 	"internal/testenv"
-	"io/ioutil"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -18,18 +15,18 @@ func TestDeadcode(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	t.Parallel()
 
-	tmpdir, err := ioutil.TempDir("", "TestDeadcode")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpdir)
+	tmpdir := t.TempDir()
 
 	tests := []struct {
-		src     string
-		pattern string
+		src      string
+		pos, neg string // positive and negative patterns
 	}{
-		{"reflectcall", "main.T.M"},
-		{"typedesc", "type.main.T"},
+		{"reflectcall", "", "main.T.M"},
+		{"typedesc", "", "type:main.T"},
+		{"ifacemethod", "", "main.T.M"},
+		{"ifacemethod2", "main.T.M", ""},
+		{"ifacemethod3", "main.S.M", ""},
+		{"ifacemethod4", "", "main.T.M"},
 	}
 	for _, test := range tests {
 		test := test
@@ -37,13 +34,16 @@ func TestDeadcode(t *testing.T) {
 			t.Parallel()
 			src := filepath.Join("testdata", "deadcode", test.src+".go")
 			exe := filepath.Join(tmpdir, test.src+".exe")
-			cmd := exec.Command(testenv.GoToolPath(t), "build", "-ldflags=-dumpdep", "-o", exe, src)
+			cmd := testenv.Command(t, testenv.GoToolPath(t), "build", "-ldflags=-dumpdep", "-o", exe, src)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("%v: %v:\n%s", cmd.Args, err, out)
 			}
-			if bytes.Contains(out, []byte(test.pattern)) {
-				t.Errorf("%s should not be reachable. Output:\n%s", test.pattern, out)
+			if test.pos != "" && !bytes.Contains(out, []byte(test.pos+"\n")) {
+				t.Errorf("%s should be reachable. Output:\n%s", test.pos, out)
+			}
+			if test.neg != "" && bytes.Contains(out, []byte(test.neg+"\n")) {
+				t.Errorf("%s should not be reachable. Output:\n%s", test.neg, out)
 			}
 		})
 	}

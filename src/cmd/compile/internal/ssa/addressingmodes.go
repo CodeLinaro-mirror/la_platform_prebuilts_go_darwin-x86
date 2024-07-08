@@ -7,12 +7,14 @@ package ssa
 // addressingModes combines address calculations into memory operations
 // that can perform complicated addressing modes.
 func addressingModes(f *Func) {
+	isInImmediateRange := is32Bit
 	switch f.Config.arch {
 	default:
 		// Most architectures can't do this.
 		return
 	case "amd64", "386":
-		// TODO: s390x?
+	case "s390x":
+		isInImmediateRange = is20Bit
 	}
 
 	var tmp []*Value
@@ -40,7 +42,7 @@ func addressingModes(f *Func) {
 			switch [2]auxType{opcodeTable[v.Op].auxType, opcodeTable[p.Op].auxType} {
 			case [2]auxType{auxSymOff, auxInt32}:
 				// TODO: introduce auxSymOff32
-				if !is32Bit(v.AuxInt + p.AuxInt) {
+				if !isInImmediateRange(v.AuxInt + p.AuxInt) {
 					continue
 				}
 				v.AuxInt += p.AuxInt
@@ -48,7 +50,7 @@ func addressingModes(f *Func) {
 				if v.Aux != nil && p.Aux != nil {
 					continue
 				}
-				if !is32Bit(v.AuxInt + p.AuxInt) {
+				if !isInImmediateRange(v.AuxInt + p.AuxInt) {
 					continue
 				}
 				if p.Aux != nil {
@@ -57,22 +59,22 @@ func addressingModes(f *Func) {
 				v.AuxInt += p.AuxInt
 			case [2]auxType{auxSymValAndOff, auxInt32}:
 				vo := ValAndOff(v.AuxInt)
-				if !vo.canAdd(p.AuxInt) {
+				if !vo.canAdd64(p.AuxInt) {
 					continue
 				}
-				v.AuxInt = vo.add(p.AuxInt)
+				v.AuxInt = int64(vo.addOffset64(p.AuxInt))
 			case [2]auxType{auxSymValAndOff, auxSymOff}:
 				vo := ValAndOff(v.AuxInt)
 				if v.Aux != nil && p.Aux != nil {
 					continue
 				}
-				if !vo.canAdd(p.AuxInt) {
+				if !vo.canAdd64(p.AuxInt) {
 					continue
 				}
 				if p.Aux != nil {
 					v.Aux = p.Aux
 				}
-				v.AuxInt = vo.add(p.AuxInt)
+				v.AuxInt = int64(vo.addOffset64(p.AuxInt))
 			case [2]auxType{auxSymOff, auxNone}:
 				// nothing to do
 			case [2]auxType{auxSymValAndOff, auxNone}:
@@ -129,10 +131,14 @@ var needSplit = map[Op]bool{
 }
 
 // For each entry k, v in this map, if we have a value x with:
-//   x.Op == k[0]
-//   x.Args[0].Op == k[1]
+//
+//	x.Op == k[0]
+//	x.Args[0].Op == k[1]
+//
 // then we can set x.Op to v and set x.Args like this:
-//   x.Args[0].Args + x.Args[1:]
+//
+//	x.Args[0].Args + x.Args[1:]
+//
 // Additionally, the Aux/AuxInt from x.Args[0] is merged into x.
 var combine = map[[2]Op]Op{
 	// amd64
@@ -190,7 +196,7 @@ var combine = map[[2]Op]Op{
 	[2]Op{OpAMD64MOVQstoreconst, OpAMD64LEAQ8}: OpAMD64MOVQstoreconstidx8,
 
 	// These instructions are re-split differently for performance, see needSplit above.
-	// TODO if 386 versions are created, also update needSplit and gen/386splitload.rules
+	// TODO if 386 versions are created, also update needSplit and _gen/386splitload.rules
 	[2]Op{OpAMD64CMPBload, OpAMD64ADDQ}: OpAMD64CMPBloadidx1,
 	[2]Op{OpAMD64CMPWload, OpAMD64ADDQ}: OpAMD64CMPWloadidx1,
 	[2]Op{OpAMD64CMPLload, OpAMD64ADDQ}: OpAMD64CMPLloadidx1,
@@ -338,6 +344,49 @@ var combine = map[[2]Op]Op{
 	[2]Op{OpAMD64DIVSDload, OpAMD64LEAQ1}: OpAMD64DIVSDloadidx1,
 	[2]Op{OpAMD64DIVSDload, OpAMD64LEAQ8}: OpAMD64DIVSDloadidx8,
 
+	[2]Op{OpAMD64SARXLload, OpAMD64ADDQ}: OpAMD64SARXLloadidx1,
+	[2]Op{OpAMD64SARXQload, OpAMD64ADDQ}: OpAMD64SARXQloadidx1,
+	[2]Op{OpAMD64SHLXLload, OpAMD64ADDQ}: OpAMD64SHLXLloadidx1,
+	[2]Op{OpAMD64SHLXQload, OpAMD64ADDQ}: OpAMD64SHLXQloadidx1,
+	[2]Op{OpAMD64SHRXLload, OpAMD64ADDQ}: OpAMD64SHRXLloadidx1,
+	[2]Op{OpAMD64SHRXQload, OpAMD64ADDQ}: OpAMD64SHRXQloadidx1,
+
+	[2]Op{OpAMD64SARXLload, OpAMD64LEAQ1}: OpAMD64SARXLloadidx1,
+	[2]Op{OpAMD64SARXLload, OpAMD64LEAQ4}: OpAMD64SARXLloadidx4,
+	[2]Op{OpAMD64SARXLload, OpAMD64LEAQ8}: OpAMD64SARXLloadidx8,
+	[2]Op{OpAMD64SARXQload, OpAMD64LEAQ1}: OpAMD64SARXQloadidx1,
+	[2]Op{OpAMD64SARXQload, OpAMD64LEAQ8}: OpAMD64SARXQloadidx8,
+	[2]Op{OpAMD64SHLXLload, OpAMD64LEAQ1}: OpAMD64SHLXLloadidx1,
+	[2]Op{OpAMD64SHLXLload, OpAMD64LEAQ4}: OpAMD64SHLXLloadidx4,
+	[2]Op{OpAMD64SHLXLload, OpAMD64LEAQ8}: OpAMD64SHLXLloadidx8,
+	[2]Op{OpAMD64SHLXQload, OpAMD64LEAQ1}: OpAMD64SHLXQloadidx1,
+	[2]Op{OpAMD64SHLXQload, OpAMD64LEAQ8}: OpAMD64SHLXQloadidx8,
+	[2]Op{OpAMD64SHRXLload, OpAMD64LEAQ1}: OpAMD64SHRXLloadidx1,
+	[2]Op{OpAMD64SHRXLload, OpAMD64LEAQ4}: OpAMD64SHRXLloadidx4,
+	[2]Op{OpAMD64SHRXLload, OpAMD64LEAQ8}: OpAMD64SHRXLloadidx8,
+	[2]Op{OpAMD64SHRXQload, OpAMD64LEAQ1}: OpAMD64SHRXQloadidx1,
+	[2]Op{OpAMD64SHRXQload, OpAMD64LEAQ8}: OpAMD64SHRXQloadidx8,
+
+	// amd64/v3
+	[2]Op{OpAMD64MOVBELload, OpAMD64ADDQ}:  OpAMD64MOVBELloadidx1,
+	[2]Op{OpAMD64MOVBEQload, OpAMD64ADDQ}:  OpAMD64MOVBEQloadidx1,
+	[2]Op{OpAMD64MOVBELload, OpAMD64LEAQ1}: OpAMD64MOVBELloadidx1,
+	[2]Op{OpAMD64MOVBELload, OpAMD64LEAQ4}: OpAMD64MOVBELloadidx4,
+	[2]Op{OpAMD64MOVBELload, OpAMD64LEAQ8}: OpAMD64MOVBELloadidx8,
+	[2]Op{OpAMD64MOVBEQload, OpAMD64LEAQ1}: OpAMD64MOVBEQloadidx1,
+	[2]Op{OpAMD64MOVBEQload, OpAMD64LEAQ8}: OpAMD64MOVBEQloadidx8,
+
+	[2]Op{OpAMD64MOVBEWstore, OpAMD64ADDQ}:  OpAMD64MOVBEWstoreidx1,
+	[2]Op{OpAMD64MOVBELstore, OpAMD64ADDQ}:  OpAMD64MOVBELstoreidx1,
+	[2]Op{OpAMD64MOVBEQstore, OpAMD64ADDQ}:  OpAMD64MOVBEQstoreidx1,
+	[2]Op{OpAMD64MOVBEWstore, OpAMD64LEAQ1}: OpAMD64MOVBEWstoreidx1,
+	[2]Op{OpAMD64MOVBEWstore, OpAMD64LEAQ2}: OpAMD64MOVBEWstoreidx2,
+	[2]Op{OpAMD64MOVBELstore, OpAMD64LEAQ1}: OpAMD64MOVBELstoreidx1,
+	[2]Op{OpAMD64MOVBELstore, OpAMD64LEAQ4}: OpAMD64MOVBELstoreidx4,
+	[2]Op{OpAMD64MOVBELstore, OpAMD64LEAQ8}: OpAMD64MOVBELstoreidx8,
+	[2]Op{OpAMD64MOVBEQstore, OpAMD64LEAQ1}: OpAMD64MOVBEQstoreidx1,
+	[2]Op{OpAMD64MOVBEQstore, OpAMD64LEAQ8}: OpAMD64MOVBEQstoreidx8,
+
 	// 386
 	[2]Op{Op386MOVBload, Op386ADDL}:  Op386MOVBloadidx1,
 	[2]Op{Op386MOVWload, Op386ADDL}:  Op386MOVWloadidx1,
@@ -398,4 +447,61 @@ var combine = map[[2]Op]Op{
 	[2]Op{Op386ANDLconstmodify, Op386LEAL4}: Op386ANDLconstmodifyidx4,
 	[2]Op{Op386ORLconstmodify, Op386LEAL4}:  Op386ORLconstmodifyidx4,
 	[2]Op{Op386XORLconstmodify, Op386LEAL4}: Op386XORLconstmodifyidx4,
+
+	// s390x
+	[2]Op{OpS390XMOVDload, OpS390XADD}: OpS390XMOVDloadidx,
+	[2]Op{OpS390XMOVWload, OpS390XADD}: OpS390XMOVWloadidx,
+	[2]Op{OpS390XMOVHload, OpS390XADD}: OpS390XMOVHloadidx,
+	[2]Op{OpS390XMOVBload, OpS390XADD}: OpS390XMOVBloadidx,
+
+	[2]Op{OpS390XMOVWZload, OpS390XADD}: OpS390XMOVWZloadidx,
+	[2]Op{OpS390XMOVHZload, OpS390XADD}: OpS390XMOVHZloadidx,
+	[2]Op{OpS390XMOVBZload, OpS390XADD}: OpS390XMOVBZloadidx,
+
+	[2]Op{OpS390XMOVDBRload, OpS390XADD}: OpS390XMOVDBRloadidx,
+	[2]Op{OpS390XMOVWBRload, OpS390XADD}: OpS390XMOVWBRloadidx,
+	[2]Op{OpS390XMOVHBRload, OpS390XADD}: OpS390XMOVHBRloadidx,
+
+	[2]Op{OpS390XFMOVDload, OpS390XADD}: OpS390XFMOVDloadidx,
+	[2]Op{OpS390XFMOVSload, OpS390XADD}: OpS390XFMOVSloadidx,
+
+	[2]Op{OpS390XMOVDstore, OpS390XADD}: OpS390XMOVDstoreidx,
+	[2]Op{OpS390XMOVWstore, OpS390XADD}: OpS390XMOVWstoreidx,
+	[2]Op{OpS390XMOVHstore, OpS390XADD}: OpS390XMOVHstoreidx,
+	[2]Op{OpS390XMOVBstore, OpS390XADD}: OpS390XMOVBstoreidx,
+
+	[2]Op{OpS390XMOVDBRstore, OpS390XADD}: OpS390XMOVDBRstoreidx,
+	[2]Op{OpS390XMOVWBRstore, OpS390XADD}: OpS390XMOVWBRstoreidx,
+	[2]Op{OpS390XMOVHBRstore, OpS390XADD}: OpS390XMOVHBRstoreidx,
+
+	[2]Op{OpS390XFMOVDstore, OpS390XADD}: OpS390XFMOVDstoreidx,
+	[2]Op{OpS390XFMOVSstore, OpS390XADD}: OpS390XFMOVSstoreidx,
+
+	[2]Op{OpS390XMOVDload, OpS390XMOVDaddridx}: OpS390XMOVDloadidx,
+	[2]Op{OpS390XMOVWload, OpS390XMOVDaddridx}: OpS390XMOVWloadidx,
+	[2]Op{OpS390XMOVHload, OpS390XMOVDaddridx}: OpS390XMOVHloadidx,
+	[2]Op{OpS390XMOVBload, OpS390XMOVDaddridx}: OpS390XMOVBloadidx,
+
+	[2]Op{OpS390XMOVWZload, OpS390XMOVDaddridx}: OpS390XMOVWZloadidx,
+	[2]Op{OpS390XMOVHZload, OpS390XMOVDaddridx}: OpS390XMOVHZloadidx,
+	[2]Op{OpS390XMOVBZload, OpS390XMOVDaddridx}: OpS390XMOVBZloadidx,
+
+	[2]Op{OpS390XMOVDBRload, OpS390XMOVDaddridx}: OpS390XMOVDBRloadidx,
+	[2]Op{OpS390XMOVWBRload, OpS390XMOVDaddridx}: OpS390XMOVWBRloadidx,
+	[2]Op{OpS390XMOVHBRload, OpS390XMOVDaddridx}: OpS390XMOVHBRloadidx,
+
+	[2]Op{OpS390XFMOVDload, OpS390XMOVDaddridx}: OpS390XFMOVDloadidx,
+	[2]Op{OpS390XFMOVSload, OpS390XMOVDaddridx}: OpS390XFMOVSloadidx,
+
+	[2]Op{OpS390XMOVDstore, OpS390XMOVDaddridx}: OpS390XMOVDstoreidx,
+	[2]Op{OpS390XMOVWstore, OpS390XMOVDaddridx}: OpS390XMOVWstoreidx,
+	[2]Op{OpS390XMOVHstore, OpS390XMOVDaddridx}: OpS390XMOVHstoreidx,
+	[2]Op{OpS390XMOVBstore, OpS390XMOVDaddridx}: OpS390XMOVBstoreidx,
+
+	[2]Op{OpS390XMOVDBRstore, OpS390XMOVDaddridx}: OpS390XMOVDBRstoreidx,
+	[2]Op{OpS390XMOVWBRstore, OpS390XMOVDaddridx}: OpS390XMOVWBRstoreidx,
+	[2]Op{OpS390XMOVHBRstore, OpS390XMOVDaddridx}: OpS390XMOVHBRstoreidx,
+
+	[2]Op{OpS390XFMOVDstore, OpS390XMOVDaddridx}: OpS390XFMOVDstoreidx,
+	[2]Op{OpS390XFMOVSstore, OpS390XMOVDaddridx}: OpS390XFMOVSstoreidx,
 }
